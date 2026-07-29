@@ -1,0 +1,8 @@
+SLM_venv/
+test.ipynb
+__pycache__/
+SLM_patterns/
+Trap_coordinates/
+Tweezer_ROIs/
+Zernike_corrections/
+test.ipynb
