@@ -88,6 +88,7 @@ from importlib import reload
 import Meadowlark_SLM.parameters as param
 from gpu_module_v7_3 import slm_to_trap_amp, trap_phase_to_slm
 from trap_lattice import coords_npy_to_traps_pos, rectangular_lattice_coords
+from temperature_log import DailyTemperatureLog
 
 PUPIL_VERTICAL_OFFSET = 0
 
@@ -263,6 +264,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.initSLM()
 
         self.last_sent_plot.installEventFilter(self)
+        self._start_slm_temperature_monitor()
 
         self.std = 10
         self.best_hologram = np.zeros((600,792))
@@ -769,8 +771,14 @@ class SLMGUI(QtWidgets.QMainWindow):
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding,
         )
+        self.label_slm_temperature = QtWidgets.QLabel("SLM temperature: —")
+        self.label_slm_temperature.setAlignment(QtCore.Qt.AlignCenter)
+        _temp_font = self.label_slm_temperature.font()
+        _temp_font.setBold(True)
+        self.label_slm_temperature.setFont(_temp_font)
         self.last_sent_preview_layout.addWidget(self.label_last_sent_preview, row=0, col=0)
-        self.last_sent_preview_layout.addWidget(self.last_sent_plot, row=1, col=0)
+        self.last_sent_preview_layout.addWidget(self.label_slm_temperature, row=1, col=0)
+        self.last_sent_preview_layout.addWidget(self.last_sent_plot, row=2, col=0)
 
     def _build_arbitrary_arrays_panel(self):
         """Build the ARBITRARY ARRAYS column (`self.arbitrary_arrays_panel`): patterns, traps, lattice export, algorithms."""
@@ -1603,6 +1611,34 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.SLM.updateArray(self.totalPhase)
         self._update_last_sent_preview()
 
+    def _start_slm_temperature_monitor(self):
+        """Poll Read_SLM_temperature once per second and log each sample."""
+        self._temperature_log = DailyTemperatureLog()
+        self._temp_log_error_reported = False
+        self._slm_temp_timer = QtCore.QTimer(self)
+        self._slm_temp_timer.setInterval(1000)
+        self._slm_temp_timer.timeout.connect(self._refresh_slm_temperature)
+        self._refresh_slm_temperature()
+        self._slm_temp_timer.start()
+
+    def _refresh_slm_temperature(self):
+        comm = getattr(getattr(self, "SLM", None), "communication", None)
+        if comm is None:
+            self.label_slm_temperature.setText("SLM temperature: —")
+            return
+        try:
+            temp_c = comm.read_temperature()
+        except Exception:
+            self.label_slm_temperature.setText("SLM temperature: unavailable")
+            return
+        self.label_slm_temperature.setText(f"SLM temperature: {temp_c:.1f} °C")
+        try:
+            self._temperature_log.append(temp_c)
+        except Exception as exc:
+            if not self._temp_log_error_reported:
+                self._temp_log_error_reported = True
+                print(f"Temperature log write failed: {exc}")
+
     def _fit_last_sent_view_to_image(self):
         """Lock the plot view to the full SLM frame so resize does not crop the preview."""
         if not hasattr(self, "totalPhase"):
@@ -2218,6 +2254,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         del self
 
     def closeEvent(self, err):
+        timer = getattr(self, "_slm_temp_timer", None)
+        if timer is not None:
+            timer.stop()
+        log = getattr(self, "_temperature_log", None)
+        if log is not None:
+            log.close()
         self._restore_stdio()
         self.__del__()
 

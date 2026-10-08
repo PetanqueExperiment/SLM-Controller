@@ -19,6 +19,7 @@ from ctypes import (
     POINTER,
     byref,
     c_char_p,
+    c_double,
     c_int,
     c_ubyte,
     c_uint,
@@ -92,6 +93,10 @@ def _bind_blink_api(dll: CDLL) -> None:
     # void Delete_SDK()
     dll.Delete_SDK.argtypes = []
     dll.Delete_SDK.restype = None
+
+    # double Read_SLM_temperature(int board)
+    dll.Read_SLM_temperature.argtypes = [c_int]
+    dll.Read_SLM_temperature.restype = c_double
 
     if hasattr(dll, "Get_last_error_message"):
         dll.Get_last_error_message.argtypes = []
@@ -175,6 +180,15 @@ def disconnect() -> None:
     finally:
         _blink_dll = None
         _sdk_connected = False
+
+
+def read_temperature(board: int = BOARD) -> float:
+    """Return the SLM temperature in degrees Celsius. Requires :func:`connect` first."""
+    if not _sdk_connected or _blink_dll is None:
+        raise RuntimeError(
+            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before reading temperature."
+        )
+    return float(_blink_dll.Read_SLM_temperature(board))
 
 
 def upload_image_to_slm(

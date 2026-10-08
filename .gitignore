@@ -5,4 +5,5 @@ SLM_patterns/
 Trap_coordinates/
 Tweezer_ROIs/
 Zernike_corrections/
+temperature_logs/*.csv
 test.ipynb
