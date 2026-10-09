@@ -98,7 +98,9 @@ position_to_step_per_pixel = 2*np.pi/param.lamb*(param.M/param.f)*param.pslm
 position_to_step_per_pixel_for_z = (np.pi)/ param.lamb  *  (param.M/param.f)**2*(param.pslm**2)
 
 LOCAL_DIR = _SLM_SOFTWARE_DIR
+SLM_PATTERNS_DIR = os.path.join(LOCAL_DIR, "SLM_patterns")
 ZERNIKE_CORRECTIONS_DIR = os.path.join(LOCAL_DIR, "Zernike_corrections")
+TWEEZER_ROIS_DIR = os.path.join(LOCAL_DIR, "Tweezer_ROIs")
 ZERNIKE_DEFAULT_COEFFS_JSON = "zernike_coefficients_default.json"
 
 # Optional measured Shack–Hartmann phase correction (radians), shape (ImgResY, ImgResX). If missing, SH map is zeros.
@@ -957,7 +959,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         '''
         Opens the dialog and saves the selected file
         '''
-        self.file = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Pattern', LOCAL_DIR+'\\holograms\\')[0]
+        os.makedirs(SLM_PATTERNS_DIR, exist_ok=True)
+        self.file = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Pattern', SLM_PATTERNS_DIR)[0]
+        if not self.file:
+            return
         self.savePattern(name = self.file)
 
     def savePattern(self, name = ''):
@@ -983,7 +988,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         '''
         Open the dialog and gets the selected file
         '''
-        self.file = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file',LOCAL_DIR+'\\holograms\\')[0]
+        os.makedirs(SLM_PATTERNS_DIR, exist_ok=True)
+        self.file = QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', SLM_PATTERNS_DIR)[0]
+        if not self.file:
+            return
         self.loadPattern(name = self.file)
 
     def loadPattern(self, name = ''):
@@ -1799,9 +1807,8 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     def saveArrayCoordinates_clicked(self):
         """Save the rectangular lattice as PyCam / ROIfinder `rois.json`."""
-        tweezer_dir = os.path.join(LOCAL_DIR, 'Tweezer_ROIs')
-        os.makedirs(tweezer_dir, exist_ok=True)
-        default_path = os.path.join(tweezer_dir, 'rois.json')
+        os.makedirs(TWEEZER_ROIS_DIR, exist_ok=True)
+        default_path = os.path.join(TWEEZER_ROIS_DIR, 'rois.json')
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             'Save trap coordinates (rois.json)',
