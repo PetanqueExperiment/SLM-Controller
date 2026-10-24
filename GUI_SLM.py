@@ -12,6 +12,8 @@ import time
 import json
 import pickle
 import random as rd
+import ast
+import re
 
 # GUI (pyqtgraph 0.14+ may otherwise pick PyQt6; this project uses PyQt5 throughout)
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
@@ -135,6 +137,45 @@ def _load_sh_correction_phase_file(ny, nx):
         'does not match SLM (%d, %d); Shack–Hartmann correction disabled until fixed.' % (ny, nx),
     )
     return out
+
+
+def parse_pasted_coordinates(text):
+    """
+    Parse pasted trap coordinates into an (N, 2) or (N, 3) float array.
+
+    Accepts Python lists/tuples (``[[x, y], ...]``), ``np.array([...])`` / ``array([...], dtype=...)``
+    reprs, and numpy ``print`` output without commas (``[[1. 2.]\\n [3. 4.]]``).
+    """
+    s = (text or '').strip()
+    if not s:
+        raise ValueError('empty input')
+    s = re.sub(r'^\s*(?:np\.|numpy\.)?(?:array|asarray)\s*\(', '', s)
+    s = re.sub(r',\s*dtype\s*=\s*[\w.\'"]+\s*', '', s)
+    s = s.strip().rstrip(';').strip()
+    while s.endswith(')') and s.count(')') > s.count('('):
+        s = s[:-1].rstrip()
+
+    try:
+        arr = np.asarray(ast.literal_eval(s), dtype=np.float64)
+    except (ValueError, SyntaxError, TypeError):
+        num = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
+        rows = [re.findall(num, grp) for grp in re.findall(r'\[([^\[\]]*)\]', s)]
+        rows = [r for r in rows if r]
+        if not rows:
+            raise ValueError('could not find any numbers')
+        if len({len(r) for r in rows}) != 1:
+            raise ValueError('rows have different lengths')
+        arr = np.asarray(rows, dtype=np.float64)
+
+    if arr.ndim == 1 and arr.size in (2, 3):
+        arr = arr[None, :]
+    if arr.ndim == 2 and arr.shape[0] in (2, 3) and arr.shape[1] not in (2, 3):
+        arr = arr.T
+    if arr.ndim != 2 or arr.shape[1] not in (2, 3) or arr.shape[0] < 1:
+        raise ValueError('expected shape (N, 2) or (N, 3), got %s' % (arr.shape,))
+    if not np.all(np.isfinite(arr)):
+        raise ValueError('coordinates contain NaN or inf')
+    return arr
 
 
 def framed_panel(inner_widget):
@@ -813,6 +854,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.saveArrayCoordinatesBtn = QtWidgets.QPushButton('Save array coordinates')
         self.generateTrapsBtn = QtWidgets.QPushButton('Generate Traps :')
         self.loadTrapPositionsEdt = MyQtLineEdit('rois')
+        self.plotTrapsBtn = QtWidgets.QPushButton('Plot traps file')
+        self.coordsToJsonBtn = QtWidgets.QPushButton('Coords → JSON')
+        self.pastedCoordsEdt = QtWidgets.QLineEdit()
+        self.pastedCoordsEdt.setPlaceholderText('[[x, y], ...] or np.array([[x, y, z], ...])')
+        self.pastedCoordsUnitsCB = QtWidgets.QComboBox()
+        self.pastedCoordsUnitsCB.addItem('px (camera)')
+        self.pastedCoordsUnitsCB.addItem('µm (focal plane)')
+        self.pastedCoordsUnitsCB.setToolTip(
+            'px: values are written as-is into "centers".\n'
+            'µm: same convention as the array generator (origin at image center, × SYSTEM_MAGNIFICATION).'
+        )
         self.runBtn = QtWidgets.QPushButton('Run Algorithm')
         self.iterationsEdit = MyQtLineEdit(str(self.GS_maxit))
         self.methodCB = QtWidgets.QComboBox()
@@ -861,6 +913,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.arbitrary_arrays_panel.addWidget(self.saveArrayCoordinatesBtn, row=line_idx, col=0)
         self.arbitrary_arrays_panel.addWidget(self.generateTrapsBtn, row=line_idx, col=1)
         self.arbitrary_arrays_panel.addWidget(self.loadTrapPositionsEdt, row=line_idx, col=2)
+        self.arbitrary_arrays_panel.addWidget(self.plotTrapsBtn, row=line_idx, col=3)
+
+        line_idx += 1
+        self.arbitrary_arrays_panel.addWidget(self.coordsToJsonBtn, row=line_idx, col=0)
+        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsEdt, row=line_idx, col=1, colspan=2)
+        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsUnitsCB, row=line_idx, col=3)
 
         line_idx += 1
         self.arbitrary_arrays_panel.addWidget(self.runBtn, row=line_idx, col=0)
@@ -877,6 +935,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.saveBtn.clicked.connect(self.savePattern_clicked)
         self.generateTrapsBtn.clicked.connect(self.generateTraps)
         self.saveArrayCoordinatesBtn.clicked.connect(self.saveArrayCoordinates_clicked)
+        self.plotTrapsBtn.clicked.connect(self.plotTrapsFile_clicked)
+        self.coordsToJsonBtn.clicked.connect(self.pastedCoordsToJson_clicked)
         self.runBtn.clicked.connect(self.runAlgorithm_clicked)
         self.equalize_with_atoms_Btn.clicked.connect(self.equalize_with_atoms)
         self.devide_slm_area_Btn.clicked.connect(self.devide_slm_area)
@@ -1869,11 +1929,15 @@ class SLMGUI(QtWidgets.QMainWindow):
             for i in range(x_um.shape[0])
         ]
         side = max(3, int(round(min(float(sx_um), float(sy_um)) / um_per_px)))
-        roi_sizes = [side]
+        self._write_rois_json(path, centers, side, angle_deg)
+
+    @staticmethod
+    def _write_rois_json(path, centers, roi_side_px, angle_deg=0.0):
+        """Write a PyCam ``rois.json`` (schema version 2) with pixel ``centers`` (int or float)."""
         doc = {
             'format_version': 2,
             'centers': centers,
-            'roi_sizes': roi_sizes,
+            'roi_sizes': [int(roi_side_px)],
             'x_com': 0.0,
             'y_com': 0.0,
             'angle_deg': float(angle_deg),
@@ -1882,6 +1946,110 @@ class SLMGUI(QtWidgets.QMainWindow):
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(doc, f, indent=2, ensure_ascii=False)
             f.write('\n')
+
+    def plotTrapsFile_clicked(self):
+        """Pick one or more ``rois.json`` files and overlay their trap centers (camera pixels) in one window."""
+        start = self._resolve_rois_json_path(self.loadTrapPositionsEdt.text()) or TWEEZER_ROIS_DIR
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            'Plot trap coordinates',
+            start,
+            'PyCam ROIs (*.json);;All files (*.*)',
+        )
+        for path in paths:
+            self._plot_traps_file(path)
+
+    def _plot_traps_file(self, path):
+        """Add the trap centers of one ``rois.json`` to the trap plot window (created if not open)."""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                doc = json.load(f)
+            centers = np.asarray(
+                [c[:2] for c in doc.get('centers', []) if isinstance(c, (list, tuple)) and len(c) >= 2],
+                dtype=np.float64,
+            )
+        except (OSError, ValueError, TypeError) as e:
+            print('Could not read trap file:', path, '-', e)
+            return
+        if centers.size == 0:
+            print('No valid "centers" in', path)
+            return
+
+        win = getattr(self, '_trap_plot_window', None)
+        if win is None or not win.isVisible():
+            win = pg.PlotWidget()
+            win.resize(600, 600)
+            win.setAspectLocked(True)
+            win.invertY(True)
+            win.showGrid(x=True, y=True, alpha=0.3)
+            win.setLabel('bottom', 'x (px)')
+            win.setLabel('left', 'y (px)')
+            win.addLegend()
+            self._trap_plot_window = win
+            self._trap_plot_count = 0
+
+        color = pg.intColor(self._trap_plot_count, hues=8)
+        self._trap_plot_count += 1
+        name = '%s (%d)' % (os.path.basename(path), centers.shape[0])
+        win.plot(
+            centers[:, 0], centers[:, 1],
+            pen=None, symbol='o', symbolSize=8, symbolBrush=color, symbolPen=None, name=name,
+        )
+        if centers.shape[0] <= 200:
+            for i, (x, y) in enumerate(centers):
+                txt = pg.TextItem(str(i), color=color, anchor=(0, 1))
+                txt.setPos(x, y)
+                win.addItem(txt)
+        win.setWindowTitle(
+            'Traps: %s' % name if self._trap_plot_count == 1 else 'Traps: %d files' % self._trap_plot_count
+        )
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        print('Plotted %d traps from %s' % (centers.shape[0], path))
+
+    def pastedCoordsToJson_clicked(self):
+        """Convert the pasted coordinate list / np.array into a PyCam ``rois.json`` chosen via a save dialog."""
+        try:
+            coords = parse_pasted_coordinates(self.pastedCoordsEdt.text())
+        except ValueError as e:
+            print('Invalid pasted coordinates:', e)
+            return
+        if coords.shape[1] == 3 and np.any(coords[:, 2] != 0):
+            print('Note: z column ignored (rois.json stores only x, y).')
+
+        xy = coords[:, :2]
+        if self.pastedCoordsUnitsCB.currentIndex() == 1:
+            um_per_px = float(ROI_JSON_UM_PER_CAMERA_PIXEL)
+            if um_per_px <= 0:
+                um_per_px = 1.0
+            center = np.array([0.5 * float(param.ImgResX), 0.5 * float(param.ImgResY)])
+            xy = xy * float(SYSTEM_MAGNIFICATION) / um_per_px + center
+        centers = [[round(float(x), 4), round(float(y), 4)] for x, y in xy]
+
+        if xy.shape[0] > 1:
+            d = np.sqrt(((xy[:, None, :] - xy[None, :, :]) ** 2).sum(axis=-1))
+            np.fill_diagonal(d, np.inf)
+            side = max(3, int(round(d.min())))
+        else:
+            side = 3
+
+        os.makedirs(TWEEZER_ROIS_DIR, exist_ok=True)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            'Save pasted coordinates (rois.json)',
+            os.path.join(TWEEZER_ROIS_DIR, 'rois_custom.json'),
+            'PyCam ROIs (*.json)',
+        )
+        if not path:
+            return
+        path = path.strip()
+        if not path.lower().endswith('.json'):
+            path = os.path.splitext(path)[0] + '.json'
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        self._write_rois_json(path, centers, side, 0.0)
+        self.loadTrapPositionsEdt.setText(os.path.splitext(os.path.basename(path))[0])
+        print('Saved PyCam ROIs:', path, '(%d centers, roi size %d px)' % (len(centers), side))
 
     def generateTraps(self):
         """Load trap coordinates from PyCam ``rois.json`` (see ``_load_traps_from_pattern_file``)."""
