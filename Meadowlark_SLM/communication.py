@@ -6,6 +6,10 @@ See PCIe User Manual §4 (Create_SDK, Load_LUT_file, Write_image, ImageWriteComp
 Usage for live GUI: call :func:`connect` once when opening the device, then :func:`upload_image_to_slm`
 for each frame, and :func:`disconnect` when shutting down. Per-frame work is only Write_image +
 ImageWriteComplete; Create_SDK / Load_LUT / Delete_SDK run once per session.
+
+For offline GUI testing without hardware, call :func:`connect` with ``simulate=True``
+(e.g. ``GUI_SLM.py --simulate`` / ``Start_SLM_GUI_simulate.bat``). Uploads stay in memory
+and temperature returns a stub value. Simulation is never selected automatically.
 """
 
 from __future__ import annotations
@@ -41,9 +45,18 @@ W = H = 1024
 IMAGE_SIZE = W * H
 SLM_BIT_DEPTH = 8  # 8-bit frames; manual lists 8 for 512, 12 for 1920 — use 8 for 1024×1024 8-bit API
 TRIGGER_TIMEOUT_MS = 5000
+# Nominal Meadowlark operating temperature used by the offline stub (°C).
+SIMULATED_TEMPERATURE_C = 33.0
 
 _blink_dll: CDLL | None = None
 _sdk_connected: bool = False
+_simulate: bool = False
+_last_image: np.ndarray | None = None
+
+
+def is_simulated() -> bool:
+    """True when the current session is the offline stub (no real SLM writes)."""
+    return _simulate and _sdk_connected
 
 
 def _load_blink_dll(dll_path: Path) -> CDLL:
@@ -107,10 +120,28 @@ def connect(
     *,
     dll_path: Path = BLINK_DLL,
     lut_path: Path = LUT_FILE,
+    simulate: bool = False,
 ) -> None:
-    """Load the DLL, Create_SDK, and Load_LUT_file. Safe to call again if already connected."""
-    global _blink_dll, _sdk_connected
+    """Load the DLL, Create_SDK, and Load_LUT_file. Safe to call again if already connected.
+
+    Parameters
+    ----------
+    simulate
+        If True, skip hardware and keep frames in memory. Default False (real hardware).
+    """
+    global _blink_dll, _sdk_connected, _simulate, _last_image
     if _sdk_connected:
+        return
+
+    if simulate:
+        _blink_dll = None
+        _last_image = None
+        _simulate = True
+        _sdk_connected = True
+        print(
+            "Meadowlark SLM: SIMULATE mode (no Blink SDK / hardware). "
+            "Phase patterns are kept in memory only."
+        )
         return
 
     if not dll_path.is_file():
@@ -158,6 +189,7 @@ def connect(
             raise RuntimeError(f"Load_LUT_file returned {rc}. {msg}")
 
         _blink_dll = dll
+        _simulate = False
         _sdk_connected = True
     except Exception:
         if created:
@@ -166,25 +198,37 @@ def connect(
             except Exception:
                 pass
         _blink_dll = None
+        _simulate = False
         _sdk_connected = False
         raise
 
 
 def disconnect() -> None:
     """Delete_SDK and release session state."""
-    global _blink_dll, _sdk_connected
-    if not _sdk_connected or _blink_dll is None:
+    global _blink_dll, _sdk_connected, _simulate, _last_image
+    if not _sdk_connected:
         return
     try:
-        _blink_dll.Delete_SDK()
+        if _simulate:
+            return
+        if _blink_dll is not None:
+            _blink_dll.Delete_SDK()
     finally:
         _blink_dll = None
+        _simulate = False
+        _last_image = None
         _sdk_connected = False
 
 
 def read_temperature(board: int = BOARD) -> float:
     """Return the SLM temperature in degrees Celsius. Requires :func:`connect` first."""
-    if not _sdk_connected or _blink_dll is None:
+    if not _sdk_connected:
+        raise RuntimeError(
+            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before reading temperature."
+        )
+    if _simulate:
+        return float(SIMULATED_TEMPERATURE_C)
+    if _blink_dll is None:
         raise RuntimeError(
             "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before reading temperature."
         )
@@ -194,9 +238,13 @@ def read_temperature(board: int = BOARD) -> float:
 def upload_image_to_slm(
     image_u8: np.ndarray,
 ) -> None:
-    """Send a single 1024×1024 uint8 frame to the SLM (blocking). Requires :func:`connect` first."""
-    global _blink_dll, _sdk_connected
-    if not _sdk_connected or _blink_dll is None:
+    """Send a single 1024×1024 uint8 frame to the SLM (blocking). Requires :func:`connect` first.
+
+    In simulate mode the frame is stored in memory (see :func:`get_last_image`) and not sent
+    to hardware.
+    """
+    global _blink_dll, _sdk_connected, _last_image
+    if not _sdk_connected:
         raise RuntimeError(
             "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before upload."
         )
@@ -205,6 +253,15 @@ def upload_image_to_slm(
         raise ValueError(f"Expected shape ({H}, {W}), got {image_u8.shape}")
     if image_u8.dtype != np.uint8:
         image_u8 = np.asarray(image_u8, dtype=np.uint8)
+
+    if _simulate:
+        _last_image = np.array(image_u8, copy=True)
+        return
+
+    if _blink_dll is None:
+        raise RuntimeError(
+            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before upload."
+        )
 
     dll = _blink_dll
     flat = np.ascontiguousarray(image_u8.ravel(order="C"))
@@ -226,3 +283,10 @@ def upload_image_to_slm(
     rc = dll.ImageWriteComplete(BOARD, TRIGGER_TIMEOUT_MS)
     if rc != 0:
         raise RuntimeError(f"ImageWriteComplete returned {rc}")
+
+
+def get_last_image() -> np.ndarray | None:
+    """Return a copy of the last simulated upload, or None if none / not in simulate mode."""
+    if _last_image is None:
+        return None
+    return np.array(_last_image, copy=True)

@@ -3,9 +3,20 @@ import numpy as np
 from pathlib import Path
 from PIL import Image
 
+
 class SLMDevice:
-    def __init__(self, name='No name given'):
+    def __init__(self, name='No name given', simulate=False):
+        """
+        Parameters
+        ----------
+        name
+            Device identifier (currently ``"Meadowlark SLM"``).
+        simulate
+            If True, use the offline stub (no Blink SDK / hardware).
+            Default False: connect to real hardware (raises on failure).
+        """
         self.name = name
+        self.simulated = bool(simulate)
         self.updateArray = self._update_array_placeholder
 
         if name == "Meadowlark SLM":
@@ -29,7 +40,7 @@ class SLMDevice:
 
             self.parameters = parameters
             self.communication = communication
-            communication.connect()
+            communication.connect(simulate=self.simulated)
             self.updateArray = communication.upload_image_to_slm
 
         else:

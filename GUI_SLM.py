@@ -265,17 +265,21 @@ class Equalization_intensity_thread(QtCore.QThread):
 
 class SLMGUI(QtWidgets.QMainWindow):
 
-    def __init__(self, parent=None, selected_SLM=DEFAULT_SLM):
+    def __init__(self, parent=None, selected_SLM=DEFAULT_SLM, simulate=False):
         """ In the constructor we're doing everything to get our application
             started, which is basically constructing a basic QApplication by
             its __init__ method, then adding our widgets and finally starting
-            the exec_loop."""
+            the exec_loop.
+
+            simulate: True = offline stub (no hardware); False = real SLM.
+        """
         super(SLMGUI, self).__init__()
 
         if parent:
             self.parent = parent
 
         self.selected_SLM = selected_SLM
+        self.simulate_slm = bool(simulate)
         self.remote_control = {
                 'SLM1 x': self.updateHorizontalGrating,
                 'SLM1 y': self.updateVerticalGrating,
@@ -352,7 +356,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         adjust paths and parameters as needed.
         '''
 
-        self.SLM = SLMDevice(self.selected_SLM)
+        self.SLM = SLMDevice(self.selected_SLM, simulate=self.simulate_slm)
+
+        if getattr(self.SLM, "simulated", False):
+            self.setWindowTitle("SLM Controller Petanque [SIMULATE — no hardware]")
 
         Nx, Ny = self.SLM.getSize()
 
@@ -2454,8 +2461,23 @@ def application_icon(base_dir=None):
     return QtGui.QIcon(os.path.join(base_dir, 'Icon', 'Petanque array.ico'))
 
 
+def _parse_launch_args(argv=None):
+    """CLI flags for offline GUI testing without Meadowlark hardware."""
+    import argparse
+    parser = argparse.ArgumentParser(description="SLM Controller Petanque")
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Run without Blink SDK / SLM hardware (patterns stay in memory).",
+    )
+    args, _unknown = parser.parse_known_args(argv)
+    return bool(args.simulate)
+
+
 if __name__ == '__main__':
     register_windows_taskbar_app_id()
+
+    _simulate = _parse_launch_args()
 
     if not QtWidgets.QApplication.instance():
         app = QtWidgets.QApplication(sys.argv)
@@ -2465,7 +2487,7 @@ if __name__ == '__main__':
     _app_icon = application_icon()
     app.setWindowIcon(_app_icon)
 
-    slmGui = SLMGUI()
+    slmGui = SLMGUI(simulate=_simulate)
     slmGui.setWindowIcon(_app_icon)
     slmGui.show()
     try :
