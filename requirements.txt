@@ -1,0 +1,15 @@
+# Core scientific stack
+numpy>=2.0
+scipy>=1.11
+matplotlib>=3.8
+Pillow>=10.0
+
+# GUI
+PyQt5>=5.15
+pyqtgraph>=0.13
+
+# GPU (OpenCL) hologram / trap calculations
+pyopencl>=2024.1
+
+# Analysis helpers (basic_analysis, trap_equalization_ramsey)
+lmfit>=1.2
