@@ -25,38 +25,72 @@ class AberrationControlPanel(QtWidgets.QWidget):
         lay.addWidget(self.root)
 
     def _build(self):
-        """Zernike / aberration sliders and save (`self.Abberation_control_layout`)."""
+        """Zernike / aberration fields: primary (left) and 2nd-order (right)."""
         self.root = pg.LayoutWidget()
         self.Abberation_control_layout = self.root
 
         self.label_Abberation_control_layout = QtWidgets.QLabel(""" -- ABERRATION CONTROL -- """)
         self.label_Abberation_control_layout.setAlignment(QtCore.Qt.AlignCenter)
-        self.Abberation_control_layout.addWidget(self.label_Abberation_control_layout, row=0, colspan = 2)
+        self.Abberation_control_layout.addWidget(
+            self.label_Abberation_control_layout, row=0, colspan=4
+        )
+
+        labels = list(self.gui.aberration_label_list)
+        n_primary = int(getattr(self.gui, "aberration_n_primary", 8))
+        # Defocus sits above the column headers; remaining 1st-order terms go left.
+        defocus_name = labels[0] if labels else "defocus"
+        primary = labels[1:n_primary]
+        second = labels[n_primary:]
 
         self.aber_lineEdit_list = []
-        for i, aberration_name in enumerate(self.gui.aberration_label_list):
-            label = QtWidgets.QLabel(aberration_name)
-            lineEdit = MyQtLineEdit('0')
+
+        def _add_aber_field(name, row, label_col, edit_col):
+            label = QtWidgets.QLabel(name)
+            lineEdit = MyQtLineEdit("0")
             lineEdit.setFixedWidth(50)
-            self.Abberation_control_layout.addWidget(label, row=1+i, col = 0)
-            self.Abberation_control_layout.addWidget(lineEdit, row=1+i, col = 1)
-
+            self.Abberation_control_layout.addWidget(label, row=row, col=label_col)
+            self.Abberation_control_layout.addWidget(lineEdit, row=row, col=edit_col)
             lineEdit.returnPressed.connect(self.updateAberration)
-
             self.aber_lineEdit_list.append(lineEdit)
 
-        self.loadDefaultZernikeCoeffsBtn = QtWidgets.QPushButton('Load default coefficients')
-        _zernike_save_row = 1 + len(self.gui.aberration_label_list)
-        self.Abberation_control_layout.addWidget(self.loadDefaultZernikeCoeffsBtn, row=_zernike_save_row, col=0, colspan=2)
-        self.loadDefaultZernikeCoeffsBtn.clicked.connect(self._load_default_zernike_coefficients_json)
+        # Defocus above "1st order" / "2nd order"
+        _add_aber_field(defocus_name, row=1, label_col=0, edit_col=1)
 
-        _coef_row = _zernike_save_row + 1
-        self.loadZernikeCoeffsBtn = QtWidgets.QPushButton('Load coefficients…')
-        self.saveZernikeCoeffsBtn = QtWidgets.QPushButton('Save coefficients…')
-        self.Abberation_control_layout.addWidget(self.loadZernikeCoeffsBtn, row=_coef_row, col=0)
-        self.Abberation_control_layout.addWidget(self.saveZernikeCoeffsBtn, row=_coef_row, col=1)
+        hdr_l = QtWidgets.QLabel("1st order")
+        hdr_l.setAlignment(QtCore.Qt.AlignCenter)
+        hdr_r = QtWidgets.QLabel("2nd order")
+        hdr_r.setAlignment(QtCore.Qt.AlignCenter)
+        self.Abberation_control_layout.addWidget(hdr_l, row=2, col=0, colspan=2)
+        self.Abberation_control_layout.addWidget(hdr_r, row=2, col=2, colspan=2)
+
+        for i, aberration_name in enumerate(primary):
+            _add_aber_field(aberration_name, row=3 + i, label_col=0, edit_col=1)
+        for i, aberration_name in enumerate(second):
+            _add_aber_field(aberration_name, row=3 + i, label_col=2, edit_col=3)
+
+        _btn_row = 3 + max(len(primary), len(second), 1)
+        self.loadDefaultZernikeCoeffsBtn = QtWidgets.QPushButton("Load default coefficients")
+        self.Abberation_control_layout.addWidget(
+            self.loadDefaultZernikeCoeffsBtn, row=_btn_row, col=0, colspan=4
+        )
+        self.loadDefaultZernikeCoeffsBtn.clicked.connect(
+            self._load_default_zernike_coefficients_json
+        )
+
+        _coef_row = _btn_row + 1
+        self.loadZernikeCoeffsBtn = QtWidgets.QPushButton("Load coefficients…")
+        self.saveZernikeCoeffsBtn = QtWidgets.QPushButton("Save coefficients…")
+        self.Abberation_control_layout.addWidget(self.loadZernikeCoeffsBtn, row=_coef_row, col=0, colspan=2)
+        self.Abberation_control_layout.addWidget(self.saveZernikeCoeffsBtn, row=_coef_row, col=2, colspan=2)
         self.loadZernikeCoeffsBtn.clicked.connect(self._load_zernike_coefficients_json)
         self.saveZernikeCoeffsBtn.clicked.connect(self._save_zernike_coefficients_json)
+
+    def _poly_index(self, ui_index):
+        """Map UI line-edit index → Zernike polynomial index (tip/tilt omitted)."""
+        indices = getattr(self.gui, "aberration_poly_indices", None)
+        if indices is not None:
+            return int(indices[int(ui_index)])
+        return int(ui_index) + int(getattr(self.gui, "aberration_poly_offset", 2))
 
     def updateAberration(self, aber_list= []):
         zernike_fit = np.zeros_like(self.gui.zernike_polynomials[0])
@@ -72,7 +106,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
 
             self.gui.aberration_values[i] = value
             zernike_coeff.append(value)
-            zernike_fit += value * self.gui.zernike_polynomials[i]
+            zernike_fit += value * self.gui.zernike_polynomials[self._poly_index(i)]
 
         self.gui.im_zernike = zernike_fit
 
@@ -93,50 +127,57 @@ class AberrationControlPanel(QtWidgets.QWidget):
                 self.gui.aber_lineEdit_list[i].setText(str(value))
                 self.gui.aberration_values[i] = value
             zernike_coeff.append(value)
-            zernike_fit += value * self.gui.zernike_polynomials[i]
+            zernike_fit += value * self.gui.zernike_polynomials[self._poly_index(i)]
 
         self.gui.im_zernike = zernike_fit
 
         self.gui.updatePhase()
 
     def updateAberration_defocus(self,value):
-        self.updateAberration_ext(aberration_index = 2, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 0, aberration_value = value)
 
     def updateAberration_asti0(self,value):
-        self.updateAberration_ext(aberration_index = 3, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 1, aberration_value = value)
 
     def updateAberration_asti45(self,value):
-        self.updateAberration_ext(aberration_index = 4, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 2, aberration_value = value)
 
     def updateAberration_coma0(self,value):
-        self.updateAberration_ext(aberration_index = 5, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 3, aberration_value = value)
 
     def updateAberration_coma90(self,value):
-        self.updateAberration_ext(aberration_index = 6, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 4, aberration_value = value)
 
     def updateAberration_spherical(self,value):
-        self.updateAberration_ext(aberration_index = 7, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 5, aberration_value = value)
 
     def updateAberration_trefoil0(self,value):
-        self.updateAberration_ext(aberration_index = 8, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 6, aberration_value = value)
 
     def updateAberration_trefoil90(self,value):
-        self.updateAberration_ext(aberration_index = 9, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 7, aberration_value = value)
 
     def updateAberration_asti2_0(self,value):
-        self.updateAberration_ext(aberration_index = 10, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 8, aberration_value = value)
 
     def updateAberration_asti2_45(self,value):
-        self.updateAberration_ext(aberration_index = 11, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 9, aberration_value = value)
 
     def updateAberration_coma2_0(self,value):
-        self.updateAberration_ext(aberration_index = 12, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 10, aberration_value = value)
 
     def updateAberration_coma2_90(self,value):
-        self.updateAberration_ext(aberration_index = 13, aberration_value = value)
+        self.updateAberration_ext(aberration_index = 11, aberration_value = value)
 
     def updateAberration_second_sph(self,value):
+        self.updateAberration_ext(aberration_index = 12, aberration_value = value)
+
+    def updateAberration_trefoil2_0(self,value):
+        self.updateAberration_ext(aberration_index = 13, aberration_value = value)
+
+    def updateAberration_trefoil2_90(self,value):
         self.updateAberration_ext(aberration_index = 14, aberration_value = value)
+
     def _save_zernike_coefficients_json(self):
         """Save aberration line-edit values as JSON under ``Zernike_corrections/``."""
         os.makedirs(ZERNIKE_CORRECTIONS_DIR, exist_ok=True)

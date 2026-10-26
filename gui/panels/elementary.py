@@ -28,52 +28,44 @@ class ElementaryControlPanel(QtWidgets.QWidget):
 
         self.label_w6 = QtWidgets.QLabel(""" -- ELEMENTARY CONTROL -- """)
         self.label_w6.setAlignment(QtCore.Qt.AlignCenter)
-        self.moveLabel = QtWidgets.QLabel('GRATING')
-        self.moveLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.upBtn = QtWidgets.QPushButton('UP')
-        self.downBtn = QtWidgets.QPushButton('DOWN')
-        self.leftBtn = QtWidgets.QPushButton('LEFT')
-        self.rightBtn = QtWidgets.QPushButton('RIGHT')
-        self.stepGratingEdit = MyQtLineEdit('1')
-        self.stepGratingEdit.setAlignment(QtCore.Qt.AlignCenter)
+        # self.moveLabel = QtWidgets.QLabel('GRATING')
+        # self.moveLabel.setAlignment(QtCore.Qt.AlignCenter)
+        # self.upBtn = QtWidgets.QPushButton('UP')
+        # self.downBtn = QtWidgets.QPushButton('DOWN')
+        # self.leftBtn = QtWidgets.QPushButton('LEFT')
+        # self.rightBtn = QtWidgets.QPushButton('RIGHT')
+        # self.stepGratingEdit = MyQtLineEdit('1')
+        # self.stepGratingEdit.setAlignment(QtCore.Qt.AlignCenter)
         self.positionLabel = QtWidgets.QLabel('Grating shift (in um)')
         self.position_xEdt = MyQtLineEdit(str(self.gui.dx))
         self.position_yEdt = MyQtLineEdit(str(self.gui.dy))
-        self.fresnelLabel = QtWidgets.QLabel('FRESNEL LENS')
-        self.fresnelLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.fresnelEpsilonLabel = QtWidgets.QLabel('Defocus')
-        self.fresnelEpsilonEdt = MyQtLineEdit('0')
+        # self.fresnelLabel = QtWidgets.QLabel('FRESNEL LENS')
+        # self.fresnelLabel.setAlignment(QtCore.Qt.AlignCenter)
+        # self.fresnelEpsilonLabel = QtWidgets.QLabel('Defocus')
+        # self.fresnelEpsilonEdt = MyQtLineEdit('0')
         self.paramPLabel = QtWidgets.QLabel('P parameter')
         self.paramPEdt = MyQtLineEdit(str(param.P))
         self.paramWavelengthLabel = QtWidgets.QLabel('Wavelength (nm)')
         self.paramWavelengthEdit = MyQtLineEdit('%.0f'%(param.lamb*1e9))
 
-        self.w6.addWidget(self.label_w6, row=0, colspan = 4)
-        self.w6.addWidget(self.moveLabel, row=10, col=0)
-        self.w6.addWidget(self.upBtn, row = 9, col=2)
-        self.w6.addWidget(self.downBtn, row=11, col=2)
-        self.w6.addWidget(self.leftBtn, row=10, col=1)
-        self.w6.addWidget(self.rightBtn, row=10, col=3)
-        self.w6.addWidget(self.stepGratingEdit, row=10, col=2)
-        self.w6.addWidget(self.positionLabel, row=12, col=1)
-        self.w6.addWidget(self.position_xEdt, row=12, col=2)
-        self.w6.addWidget(self.position_yEdt, row=12, col=3)
-        self.w6.addWidget(self.fresnelLabel, row=17, col=0)
-        self.w6.addWidget(self.fresnelEpsilonLabel, row=17, col=1)
-        self.w6.addWidget(self.fresnelEpsilonEdt, row=17, col=2)
-        self.w6.addWidget(self.paramPLabel, row=21, col=1)
-        self.w6.addWidget(self.paramPEdt, row=21, col=2)
-        self.w6.addWidget(self.paramWavelengthLabel, row=22, col=1)
-        self.w6.addWidget(self.paramWavelengthEdit, row=22, col=2)
+        self.w6.addWidget(self.label_w6, row=0, colspan=4)
+        self.w6.addWidget(self.positionLabel, row=1, col=0)
+        self.w6.addWidget(self.position_xEdt, row=1, col=1)
+        self.w6.addWidget(self.position_yEdt, row=1, col=2)
+        self.w6.addWidget(self.paramPLabel, row=2, col=0)
+        self.w6.addWidget(self.paramPEdt, row=2, col=1)
+        self.w6.addWidget(self.paramWavelengthLabel, row=2, col=2)
+        self.w6.addWidget(self.paramWavelengthEdit, row=2, col=3)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
-        self.upBtn.clicked.connect(self.moveUp)
-        self.downBtn.clicked.connect(self.moveDown)
-        self.leftBtn.clicked.connect(self.moveLeft)
-        self.rightBtn.clicked.connect(self.moveRight)
-        self.stepGratingEdit.returnPressed.connect(self.updateStepGrating)
+        # self.upBtn.clicked.connect(self.moveUp)
+        # self.downBtn.clicked.connect(self.moveDown)
+        # self.leftBtn.clicked.connect(self.moveLeft)
+        # self.rightBtn.clicked.connect(self.moveRight)
+        # self.stepGratingEdit.returnPressed.connect(self.updateStepGrating)
         self.position_xEdt.returnPressed.connect(self.updatePositionGrating)
         self.position_yEdt.returnPressed.connect(self.updatePositionGrating)
-        self.fresnelEpsilonEdt.returnPressed.connect(self.createFresnelPattern)
+        # self.fresnelEpsilonEdt.returnPressed.connect(self.createFresnelPattern)
         self.paramPEdt.returnPressed.connect(self.updateParamP) #2020/01/27
         self.paramWavelengthEdit.returnPressed.connect(self.updateParamWavelength)
 
@@ -93,14 +85,38 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.gui.dy = self.gui.dy - self.gui.deltay
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
+    @staticmethod
+    def _set_float_line_edit(edit, value):
+        """
+        Write ``value`` into a float line edit without disturbing the text/cursor
+        when the numeric value is already the same (e.g. Enter after Up/Down).
+        When the value does change, keep the existing decimal precision.
+        """
+        value = float(value)
+        text = edit.text().strip()
+        try:
+            if abs(float(text) - value) <= 1e-12 * max(1.0, abs(value)):
+                return
+        except ValueError:
+            pass
+        cpos = edit.cursorPosition()
+        decimalpos = text.find(".")
+        if decimalpos >= 0:
+            precision = max(0, len(text) - decimalpos - 1)
+            newtext = f"{value:.{precision}f}"
+        elif abs(value - round(value)) < 1e-12:
+            newtext = str(int(round(value)))
+        else:
+            newtext = repr(value)
+        edit.setText(newtext)
+        edit.setCursorPosition(min(max(0, cpos + len(newtext) - len(text)), len(newtext)))
+
     def updateHorizontalGrating(self,x):
         self.gui.dx = x
-        self.position_xEdt.setText(str(x))
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
     def updateVerticalGrating(self,y):
         self.gui.dy = y
-        self.position_yEdt.setText(str(y))
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
     def updatePositionGrating(self):
@@ -141,8 +157,8 @@ class ElementaryControlPanel(QtWidgets.QWidget):
 
         phi = 2pi * M/f * d * pixel separation / wavelength
         '''
-        self.position_xEdt.setText(str(dx))
-        self.position_yEdt.setText(str(dy))
+        self._set_float_line_edit(self.position_xEdt, dx)
+        self._set_float_line_edit(self.position_yEdt, dy)
 
         dphi_x = 2 * np.pi / param.lamb * param.M / param.f * dx * 1e-6
         dphi_y = 2 * np.pi / param.lamb * param.M / param.f * dy * 1e-6
@@ -157,7 +173,7 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         if dz == None:
             dz = float(self.fresnelEpsilonEdt.text())
         else:
-            self.fresnelEpsilonEdt.setText(str(dz))
+            self._set_float_line_edit(self.fresnelEpsilonEdt, dz)
 
         self.gui.fresnelPhase = np.pi/param.lamb * (param.M/param.f)**2 * dz*1e-6 * (self.gui.X**2+self.gui.Y**2)
         self.gui.updatePhase()

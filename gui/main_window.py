@@ -70,6 +70,8 @@ class SLMGUI(QtWidgets.QMainWindow):
             "SLM1: trefoil0": self.aberration.updateAberration_trefoil0,
             "SLM1: trefoil90": self.aberration.updateAberration_trefoil90,
             "SLM1: asti2 0": self.aberration.updateAberration_asti2_0,
+            "SLM1: trefoil2 0": self.aberration.updateAberration_trefoil2_0,
+            "SLM1: trefoil2 90": self.aberration.updateAberration_trefoil2_90,
         }
 
     def state_to_dict(self):
@@ -157,9 +159,9 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.dx = 0
         self.dy = 0
 
+        # Tip/tilt (Zernike indices 0–1) omitted from the UI.
+        # Poly indices skip tetrafoil (15–16) so trefoil 2nd maps to Z19/Z20.
         self.aberration_label_list = [
-            "tip",
-            "tilt",
             "defocus",
             "asti 0",
             "asti 45",
@@ -172,8 +174,18 @@ class SLMGUI(QtWidgets.QMainWindow):
             "asti 2nd 45",
             "coma 2nd 0",
             "coma 2nd 90",
-            "secondary spherical",
+            "2nd spherical",
+            "trefoil 2nd 0",
+            "trefoil 2nd 90",
         ]
+        self.aberration_poly_indices = [
+            2, 3, 4, 5, 6, 7, 8, 9,  # defocus … trefoil
+            10, 11, 12, 13, 14,  # asti/coma 2nd, 2nd spherical
+            17, 18,  # trefoil 2nd (Z19/Z20); skip tetrafoil 15–16
+        ]
+        # First N labels go in the left column; the rest are 2nd-order (right column).
+        self.aberration_n_primary = 8
+        self.aberration_poly_offset = 2  # fallback if poly_indices missing
         self.aberration_values = np.zeros(len(self.aberration_label_list))
 
         self.N_traps = 30
@@ -223,11 +235,26 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.global_layout = pg.LayoutWidget()
 
+        # Left column in its own VBox so Elementary is not stretched to the
+        # Arbitrary Arrays row height in the outer grid.
+        left_col = QtWidgets.QWidget()
+        left_lay = QtWidgets.QVBoxLayout(left_col)
+        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay.setSpacing(4)
+
         self.elementary = ElementaryControlPanel(self)
-        self.global_layout.addWidget(framed_panel(self.elementary), row=0, col=0)
+        elem_frame = framed_panel(self.elementary)
+        elem_frame.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
+        )
+        left_lay.addWidget(elem_frame)
 
         self.advanced = AdvancedControlPanel(self)
-        self.global_layout.addWidget(framed_panel(self.advanced), row=1, col=0)
+        adv_frame = framed_panel(self.advanced)
+        adv_frame.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
+        )
+        left_lay.addWidget(adv_frame)
         # Aliases for updatePhase / cross-panel reads
         self.ManufacturerCorrectionChkBx = self.advanced.ManufacturerCorrectionChkBx
         self.zernikeCorrectionChkBx = self.advanced.zernikeCorrectionChkBx
@@ -238,14 +265,22 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.pupilOutLineEdit = self.advanced.pupilOutLineEdit
 
         self.aberration = AberrationControlPanel(self)
-        self.global_layout.addWidget(framed_panel(self.aberration), row=0, col=1, rowspan=2)
+        aber_frame = framed_panel(self.aberration)
+        aber_frame.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
+        )
+        left_lay.addWidget(aber_frame)
+        left_lay.addStretch(1)
+
         self.aber_lineEdit_list = self.aberration.aber_lineEdit_list
 
+        self.global_layout.addWidget(left_col, row=0, col=0, rowspan=2)
+
         self.arbitrary = ArbitraryArraysPanel(self)
-        self.global_layout.addWidget(framed_panel(self.arbitrary), row=0, col=2)
+        self.global_layout.addWidget(framed_panel(self.arbitrary), row=0, col=1)
 
         self.preview = LastSentPreviewPanel(self)
-        self.global_layout.addWidget(framed_panel(self.preview), row=1, col=2)
+        self.global_layout.addWidget(framed_panel(self.preview), row=1, col=1)
         self.last_sent_plot = self.preview.last_sent_plot
         self.last_sent_img_item = self.preview.last_sent_img_item
         self.last_sent_colorbar = self.preview.last_sent_colorbar
