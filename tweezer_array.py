@@ -1,5 +1,5 @@
 """
-Rectangular tweezer lattices for SLM trap files.
+Build rectangular arrays of optical tweezers for SLM trap files.
 
 Saved `.npy` arrays use shape **(N, 3)**, dtype float64, coordinates in **meters**:
   column 0 -> x (horizontal, HORIZ in legacy .dat)
