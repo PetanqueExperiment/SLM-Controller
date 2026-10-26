@@ -195,6 +195,10 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.arbitrary_arrays_panel.addWidget(self.loadBtn, row=line_idx, col=1)
         self.arbitrary_arrays_panel.addWidget(self.saveBtn, row=line_idx, col=2)
 
+        line_idx += 1
+        self.arbitrary_arrays_panel.addWidget(self.coordsToJsonBtn, row=line_idx, col=0)
+        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsEdt, row=line_idx, col=1, colspan=2)
+        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsUnitsCB, row=line_idx, col=3)
 
         line_idx += 1
         self.arbitrary_arrays_panel.addWidget(self.latticeGridLabel, row=line_idx, col=0)
@@ -228,19 +232,14 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.arbitrary_arrays_panel.addWidget(self.plotTrapsBtn, row=line_idx, col=3)
 
         line_idx += 1
-        self.arbitrary_arrays_panel.addWidget(self.coordsToJsonBtn, row=line_idx, col=0)
-        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsEdt, row=line_idx, col=1, colspan=2)
-        self.arbitrary_arrays_panel.addWidget(self.pastedCoordsUnitsCB, row=line_idx, col=3)
-
-        line_idx += 1
         self.arbitrary_arrays_panel.addWidget(self.runBtn, row=line_idx, col=0)
         self.arbitrary_arrays_panel.addWidget(self.methodCB, row=line_idx, col=1)
         self.arbitrary_arrays_panel.addWidget(self.iterationsEdit, row=line_idx, col=2)
 
-        line_idx += 1
-        self.arbitrary_arrays_panel.addWidget(self.equalize_with_atoms_Btn, row=line_idx, col=0)
-        self.arbitrary_arrays_panel.addWidget(self.computeHologram_Btn, row=line_idx, col=1)
-        self.arbitrary_arrays_panel.addWidget(self.devide_slm_area_Btn, row=line_idx, col=2)
+        # line_idx += 1
+        # self.arbitrary_arrays_panel.addWidget(self.equalize_with_atoms_Btn, row=line_idx, col=0)
+        # self.arbitrary_arrays_panel.addWidget(self.computeHologram_Btn, row=line_idx, col=1)
+        # self.arbitrary_arrays_panel.addWidget(self.devide_slm_area_Btn, row=line_idx, col=2)
 
         self.generateBlankBtn.clicked.connect(self.generateBlank)
         self.loadBtn.clicked.connect(self.loadPattern_clicked)
@@ -250,9 +249,9 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.plotTrapsBtn.clicked.connect(self.plotTrapsFile_clicked)
         self.coordsToJsonBtn.clicked.connect(self.pastedCoordsToJson_clicked)
         self.runBtn.clicked.connect(self.runAlgorithm_clicked)
-        self.equalize_with_atoms_Btn.clicked.connect(self.equalize_with_atoms)
-        self.devide_slm_area_Btn.clicked.connect(self.devide_slm_area)
-        self.computeHologram_Btn.clicked.connect(self.computeHologram_clicked)
+        # self.equalize_with_atoms_Btn.clicked.connect(self.equalize_with_atoms)
+        # self.devide_slm_area_Btn.clicked.connect(self.devide_slm_area)
+        # self.computeHologram_Btn.clicked.connect(self.computeHologram_clicked)
 
     def runAlgorithm_clicked(self):
         method = str(self.methodCB.currentText())
@@ -919,6 +918,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         print('1st calculation:')
         print('Efficiency std = %.1f'%(efficiency*100))
         print('Intensity std = %.1f'%(uniformity*100))
+        _pump_gui()
 
         #Start the iterations5
         for k in range(GS_maxit):
@@ -944,6 +944,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             uniformity = np.std(trap_intensities)/np.mean(trap_intensities)
             print('Efficiency std = %.1f'%(efficiency*100))
             print('Intensity std = %.1f'%(uniformity*100))
+            _pump_gui()
 
         return phi
 
@@ -952,6 +953,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         Weighted Gerchberg−Saxton (GS). Otpimize the phase and weigth of each grating.
         '''
         print('Starting weighted Gerchberg-Saxton calculation')
+        _pump_gui()
         if not self._ensure_traps_loaded():
             return None
 
@@ -990,9 +992,11 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         print('Initial calculation:')
         print('Efficiency std = %.1f'%(efficiency*100))
         print('Intensity std = %.1f'%(uniformity*100))
+        _pump_gui()
 
         # Start the iterations
         for k in range(GSW_maxit):
+            print('    WGS %d/%d' % (k + 1, GSW_maxit))
             # Calculate new phases and weights
             self.gui.theta_traps  = np.angle(traps_amplitude)
             self.gui.weight_traps *= 1. / rel_dev
@@ -1011,6 +1015,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             uniformity              = np.std(deviation_from_target)/np.mean(deviation_from_target)
             print('Efficiency std = %.1f'%(efficiency*100))
             print('Intensity std = %.1f'%(uniformity*100))
+            _pump_gui()
 
         return phi
 
