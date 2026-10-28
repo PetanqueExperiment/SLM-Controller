@@ -21,7 +21,7 @@ from gui.main_window import SLMGUI
 if __name__ == "__main__":
     register_windows_taskbar_app_id()
 
-    _simulate = parse_launch_args()
+    _args = parse_launch_args()
 
     if not QtWidgets.QApplication.instance():
         app = QtWidgets.QApplication(sys.argv)
@@ -31,7 +31,11 @@ if __name__ == "__main__":
     _app_icon = application_icon()
     app.setWindowIcon(_app_icon)
 
-    slmGui = SLMGUI(simulate=_simulate)
+    slmGui = SLMGUI(
+        simulate=_args.simulate,
+        start_hero=not _args.no_hero,
+        hero_name=_args.hero_name,
+    )
     slmGui.setWindowIcon(_app_icon)
     slmGui.show()
     try:

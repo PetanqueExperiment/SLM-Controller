@@ -29,7 +29,7 @@ import Meadowlark_SLM.parameters as param
 
 class SLMGUI(QtWidgets.QMainWindow):
 
-    def __init__(self, parent=None, selected_SLM=DEFAULT_SLM, simulate=False):
+    def __init__(self, parent=None, selected_SLM=DEFAULT_SLM, simulate=False, start_hero=False, hero_name=None):
         super(SLMGUI, self).__init__()
 
         if parent:
@@ -52,6 +52,30 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.best_hologram = np.zeros((600, 792))
 
         self._wire_remote_control()
+
+        self.hero = None
+        if start_hero:
+            self._start_hero(hero_name)
+
+    def _start_hero(self, name=None):
+        """Expose grating shift + Zernike coefficients over HEROS (optional dependency)."""
+        try:
+            from gui.hero import HERO_NAME, SLMHero
+        except ImportError as e:
+            print("HERO disabled (heros not installed):", e)
+            return
+        if name is None:
+            name = HERO_NAME + ("_sim" if self.simulate_slm else "")
+        try:
+            self.hero = SLMHero(self, name)
+            print("HERO started:", name)
+        except Exception as e:
+            print("HERO could not be started:", e)
+
+    def _stop_hero(self):
+        hero, self.hero = getattr(self, "hero", None), None
+        if hero is not None:
+            hero.__exit__(None, None, None)
 
     def _wire_remote_control(self):
         self.remote_control = {
@@ -343,5 +367,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         log = getattr(self, "_temperature_log", None)
         if log is not None:
             log.close()
+        self._stop_hero()
         self._restore_stdio()
         self.__del__()

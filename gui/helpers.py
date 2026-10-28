@@ -102,7 +102,7 @@ def application_icon(base_dir=None):
 
 
 def parse_launch_args(argv=None):
-    """CLI flags for offline GUI testing without Meadowlark hardware."""
+    """CLI flags: offline testing without Meadowlark hardware, HERO options."""
     import argparse
 
     parser = argparse.ArgumentParser(description="SLM Controller Petanque")
@@ -111,5 +111,15 @@ def parse_launch_args(argv=None):
         action="store_true",
         help="Run without Blink SDK / SLM hardware (patterns stay in memory).",
     )
+    parser.add_argument(
+        "--no-hero",
+        action="store_true",
+        help="Do not expose the GUI as a HERO (remote grating / Zernike control).",
+    )
+    parser.add_argument(
+        "--hero-name",
+        default=None,
+        help="HERO name (default: SLM_Controller, SLM_Controller_sim with --simulate).",
+    )
     args, _unknown = parser.parse_known_args(argv)
-    return bool(args.simulate)
+    return args

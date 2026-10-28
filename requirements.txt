@@ -13,3 +13,6 @@ pyopencl>=2024.1
 
 # Analysis helpers (basic_analysis, trap_equalization_ramsey)
 lmfit>=1.2
+
+# Remote control over HEROS (optional; GUI runs without it)
+heros>=0.13
