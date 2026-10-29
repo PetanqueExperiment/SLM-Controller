@@ -109,6 +109,17 @@ class SLMHero(LocalHERO):
             return self.set_grating_y(value)[1]
         return self.set_zernike(param_id, value)[param_id]
 
+    def sequencer_read_static(self, param_id: str) -> float:
+        """Current value of ``grating_x``, ``grating_y`` or a Zernike name."""
+        if param_id == GRATING_X:
+            return self.get_grating_shift()[0]
+        if param_id == GRATING_Y:
+            return self.get_grating_shift()[1]
+        coefficients = self.get_zernike_coefficients()
+        if param_id not in coefficients:
+            raise KeyError(f"unknown param_id {param_id!r}; valid: {[GRATING_X, GRATING_Y, *coefficients]}")
+        return coefficients[param_id]
+
     # ---- GUI-thread internals ----------------------------------------------
 
     def _set_grating(self, dx, dy):
