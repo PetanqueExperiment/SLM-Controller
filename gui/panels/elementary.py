@@ -90,7 +90,8 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         """
         Write ``value`` into a float line edit without disturbing the text/cursor
         when the numeric value is already the same (e.g. Enter after Up/Down).
-        When the value does change, keep the existing decimal precision.
+        When the value does change, keep the existing decimal precision unless
+        that would round it (e.g. a remote HERO call with more decimals).
         """
         value = float(value)
         text = edit.text().strip()
@@ -107,6 +108,8 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         elif abs(value - round(value)) < 1e-12:
             newtext = str(int(round(value)))
         else:
+            newtext = repr(value)
+        if abs(float(newtext) - value) > 1e-12 * max(1.0, abs(value)):
             newtext = repr(value)
         edit.setText(newtext)
         edit.setCursorPosition(min(max(0, cpos + len(newtext) - len(text)), len(newtext)))
