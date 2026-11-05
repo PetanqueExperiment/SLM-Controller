@@ -247,6 +247,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         # Algorithms registered after the arbitrary-arrays panel exists
         self.methodList = {
             "WGS SLMcorr": lambda: self.arbitrary.WGS(correct_diffraction_efficiency=True),
+            "WGS": lambda: self.arbitrary.WGS(correct_diffraction_efficiency=False),
         }
         self.arbitrary.methodCB.clear()
         for key in self.methodList:

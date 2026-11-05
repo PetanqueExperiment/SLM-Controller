@@ -262,6 +262,11 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         This function chooses the method to calculate the phase mask for
         the desired trap positions
         '''
+        # Each run starts from the current trap file, with fresh phases and weights
+        if not self._load_traps_from_pattern_file(verbose=True):
+            print('Run aborted: could not load trap coordinates.')
+            return
+
         try :
             image = self.gui.methodList[method]()
         except :
@@ -356,6 +361,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
     def unpack_traps_dict(self):
         self.gui.traps_pos      = self.gui.traps_dict['traps_pos']
         self.gui.traps_k        = self.gui.traps_dict['traps_k']
+        self.gui.N_traps        = int(self.gui.traps_pos.shape[0])
         self.gui.theta_traps    = self.gui.traps_dict['theta_traps']
         self.gui.weight_traps   = self.gui.traps_dict['weight_traps']
         self.gui.pupil_traps    = self.gui.traps_dict['pupil_traps']
@@ -399,12 +405,12 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
     def _traps_ready(self):
         """True if trap arrays are initialized from a file or pickle (ready for algorithms)."""
-        tp = getattr(self, 'traps_pos', None)
+        tp = getattr(self.gui, 'traps_pos', None)
         if not isinstance(tp, np.ndarray) or tp.ndim != 2 or tp.shape[1] != 4:
             return False
         if tp.shape[0] < 1:
             return False
-        tk = getattr(self, 'traps_k', None)
+        tk = getattr(self.gui, 'traps_k', None)
         if not isinstance(tk, np.ndarray) or tk.shape != (tp.shape[0], 3):
             return False
         return True
@@ -565,7 +571,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         """
         UTF-8 JSON, indent=2. Schema version 2: centers, roi_sizes, x_com, y_com, angle_deg, rescale.
 
-        Array coordinates (m) are mapped to integer camera pixels using ROI_JSON_UM_PER_CAMERA_PIXEL
+        Array coordinates (m) are mapped to sub-pixel camera pixels using ROI_JSON_UM_PER_CAMERA_PIXEL
         and origin at (ImgResX/2, ImgResY/2). Tune the constant for your PyCam calibration.
         """
         um_per_px = float(ROI_JSON_UM_PER_CAMERA_PIXEL)
@@ -576,7 +582,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         x_um = arr_m[:, 0] * 1e6
         y_um = arr_m[:, 1] * 1e6
         centers = [
-            [int(round(x_um[i] / um_per_px + cx)), int(round(y_um[i] / um_per_px + cy))]
+            [round(float(x_um[i] / um_per_px + cx), 4), round(float(y_um[i] / um_per_px + cy), 4)]
             for i in range(x_um.shape[0])
         ]
         side = max(3, int(round(min(float(sx_um), float(sy_um)) / um_per_px)))
@@ -963,6 +969,13 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
             # The SLM diffraction efficiency depends on the displacement of the traps
             SLM_diffraction_efficiency = 1. - 0.5*traps_displacements/SLM_DIFFRACTION_EFFICIENCY_HWHM
+
+            # The linear model reaches zero at 2*HWHM; beyond that the weights would become NaN
+            if np.any(SLM_diffraction_efficiency <= 0):
+                print('WGS aborted: traps reach %.0f um from the center, but the SLM efficiency '
+                      'model is only valid below %.0f um. Use plain WGS for this trap file.'
+                      % (np.max(traps_displacements)*1e6, 2*SLM_DIFFRACTION_EFFICIENCY_HWHM*1e6))
+                return None
 
             # Correct for the limited diffraction efficiency
             target_intensities = 1./SLM_diffraction_efficiency
