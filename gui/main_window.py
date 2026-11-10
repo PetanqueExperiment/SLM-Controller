@@ -1,6 +1,9 @@
 """SLMGUI main window: shared phase state and dock layout."""
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,8 +29,164 @@ except ImportError:
 
 import Meadowlark_SLM.parameters as param
 
+if TYPE_CHECKING:
+    from gui.hero import SLMHero
+    from temperature_log import DailyTemperatureLog
+
+
+# Fraction of the window height given to the bottom Output (log) dock;
+# the remaining height goes to the main "All" dock.
+OUTPUT_HEIGHT_FRACTION = 0.10
+
+
+class SLMMode:
+    """Base class for an operating regime of the SLM; decides which panels are shown."""
+    name: str = ""
+
+
+class Static(SLMMode):
+    name = "Static"
+
+
+class Dynamic(SLMMode):
+    name = "Dynamic"
+
+
+class Rearranger(SLMMode):
+    name = "Rearranger"
+
 
 class SLMGUI(QtWidgets.QMainWindow):
+    # --- Construction / device ---
+    parent: Any                       # optional owner passed to __init__ (only set if given)
+    _selected_SLM: str
+    _simulate_slm: bool
+    SLM: SLMDevice
+    SLM_shape: tuple[int, int]        # (Ny, Nx)
+    param_P: int                      # gray levels per 2π (from SLM parameters)
+
+    # --- Remote control / state saving ---
+    _remote_control: dict[str, Callable[..., Any]]
+    _state_dict: dict[str, Any]
+    _hero: Optional[SLMHero]
+
+    # --- SLM coordinate grids ---
+    X: np.ndarray                     # (Ny, Nx) x coordinate on the SLM [m]
+    Y: np.ndarray                     # (Ny, Nx) y coordinate on the SLM [m]
+    i_slm: np.ndarray                 # (Ny, Nx) column index
+    _j_slm: np.ndarray                # (Ny, Nx) row index
+    deltax: float
+    deltay: float
+    _epsilon: float
+
+    # --- Phase terms summed in updatePhase ---
+    phasePattern: np.ndarray          # (Ny, Nx) pattern from Arbitrary Arrays / Blank [rad]
+    im_grating: np.ndarray            # (Ny, Nx) steering grating from Elementary [rad]
+    fresnelPhase: np.ndarray          # (Ny, Nx) Fresnel lens from Elementary [rad]
+    im_zernike: np.ndarray            # (Ny, Nx) Zernike correction from Aberration [rad]
+    totalPhase: np.ndarray            # (Ny, Nx) uint8 frame last sent to the SLM
+
+    # --- Grating ---
+    dx: float
+    dy: float
+
+    # --- Zernike / aberrations ---
+    _zernike_r: np.ndarray            # (Ny, Nx) normalized pupil radius
+    _zernike_theta: np.ndarray        # (Ny, Nx) polar angle
+    _zernike_pupil_radius: float      # [m]
+    _zernike_coefficients: list[float]
+    zernike_polynomials: np.ndarray   # (n_poly, Ny, Nx), scaled by 2π
+    aberration_label_list: list[str]
+    aberration_poly_indices: list[int]
+    aberration_n_primary: int
+    aberration_poly_offset: int
+    aberration_values: np.ndarray     # one value per aberration label
+
+    # --- Traps / arbitrary arrays ---
+    N_traps: int
+    traps_dict: dict[str, Any]        # what Save/Load Hologram pickles
+    traps_pos: np.ndarray             # (N, 4): index, y, x, z [m]; [[]] before traps are loaded
+    traps_k: np.ndarray               # (N, 3) k-vectors; [[]] before traps are loaded
+    theta_traps: np.ndarray           # (N,) trap phases; [] before traps are loaded
+    weight_traps: np.ndarray          # (N,) WGS weights (set by Arbitrary Arrays)
+    pupil_traps: dict[str, np.ndarray]  # per-trap pupil axes / angle (set by Arbitrary Arrays)
+    _weigth_traps: list               # unused (misspelled; weight_traps is the real one)
+    _theta_traps_list: list
+    _weight_traps_list: list
+    k_dump: np.ndarray                # (2,)
+    file: str                         # last hologram file loaded / saved
+
+    # --- TEM01 / SO parameters ---
+    spacing: float
+    theta_deg: float
+    r_pi: float
+
+    # --- Algorithm settings ---
+    _equalize_iter: int
+    equalize_gain: float
+    GS_maxit: int
+    GAA_xi: float
+    methodList: dict[str, Callable[[], Optional[np.ndarray]]]
+    std: float
+    best_hologram: np.ndarray
+
+    # --- Layout / panels ---
+    area: dockarea.DockArea
+    _d1: dockarea.Dock
+    _global_layout: pg.LayoutWidget
+    elementary: ElementaryControlPanel
+    _advanced: AdvancedControlPanel
+    aberration: AberrationControlPanel
+    _arbitrary: ArbitraryArraysPanel
+    _preview: LastSentPreviewPanel
+    _output: OutputDock
+    _dock_ratio_user_set: bool
+    _dock_splitter_connected: bool
+
+    # --- Aliases of panel widgets ---
+    _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
+    _zernikeCorrectionChkBx: QtWidgets.QCheckBox
+    _pupilChkBx: QtWidgets.QCheckBox
+    pupilEdt: QtWidgets.QLineEdit
+    pupilCenterEdt_x0: QtWidgets.QLineEdit
+    pupilCenterEdt_y0: QtWidgets.QLineEdit
+    pupilOutLineEdit: QtWidgets.QLineEdit
+    aber_lineEdit_list: list[QtWidgets.QLineEdit]
+    _last_sent_plot: pg.PlotWidget
+    _last_sent_img_item: pg.ImageItem
+    _last_sent_colorbar: pg.ColorBarItem
+    _label_slm_temperature: QtWidgets.QLabel
+
+    # --- stdout / stderr redirection to the Output log ---
+    _stdout_prev: Any
+    _stderr_prev: Any
+    _stdout_tee: StreamToPlainText
+    _stderr_tee: StreamToPlainText
+
+    # --- Set on this object by the panels (not in __init__) ---
+    # Output dock (gui/panels/output.py)
+    d_output: dockarea.Dock
+    output_log: QtWidgets.QPlainTextEdit
+    btn_clear_output_log: QtWidgets.QPushButton
+    # Advanced panel (gui/panels/advanced.py)
+    grating_out: np.ndarray
+    pupil: np.ndarray
+    pupil_type: str
+    phi_tem01: np.ndarray
+    phi_ovula: np.ndarray
+    phi_SO: np.ndarray
+    phi_LG: np.ndarray
+    angularM: int
+    ImgCenterX: int
+    ImgCenterY: int
+    # Arbitrary Arrays panel (gui/panels/arbitrary_arrays.py)
+    map: Any
+    _trap_plot_window: pg.PlotWidget
+    _trap_plot_count: int
+    # Preview panel (gui/panels/preview.py)
+    _temperature_log: DailyTemperatureLog
+    _slm_temp_timer: QtCore.QTimer
+    _temp_log_error_reported: bool
 
     def __init__(self, parent=None, selected_SLM=DEFAULT_SLM, simulate=False, start_hero=False, hero_name=None):
         super(SLMGUI, self).__init__()
@@ -35,25 +194,25 @@ class SLMGUI(QtWidgets.QMainWindow):
         if parent:
             self.parent = parent
 
-        self.selected_SLM = selected_SLM
-        self.simulate_slm = bool(simulate)
-        self.remote_control = {}
+        self._selected_SLM = selected_SLM
+        self._simulate_slm = bool(simulate)
+        self._remote_control = {}
 
-        self.state_dict = {}
+        self._state_dict = {}
 
         self.initUI()
         self.initSLM()
 
-        self.last_sent_plot.installEventFilter(self.preview)
-        self.preview.ft_plot.installEventFilter(self.preview)
-        self.preview._start_slm_temperature_monitor()
+        self._last_sent_plot.installEventFilter(self._preview)
+        self._preview.ft_plot.installEventFilter(self._preview)
+        self._preview._start_slm_temperature_monitor()
 
         self.std = 10
         self.best_hologram = np.zeros((600, 792))
 
         self._wire_remote_control()
 
-        self.hero = None
+        self._hero = None
         if start_hero:
             self._start_hero(hero_name)
 
@@ -65,21 +224,21 @@ class SLMGUI(QtWidgets.QMainWindow):
             print("HERO disabled (heros not installed):", e)
             return
         if name is None:
-            name = HERO_NAME + ("_sim" if self.simulate_slm else "")
+            name = HERO_NAME + ("_sim" if self._simulate_slm else "")
         try:
-            self.hero = SLMHero(self, name)
+            self._hero = SLMHero(self, name)
             print("HERO started:", name)
         except Exception as e:
             print("HERO could not be started:", e)
 
     def _stop_hero(self):
-        hero, self.hero = getattr(self, "hero", None), None
+        hero, self._hero = getattr(self, "_hero", None), None
         if hero is not None:
             hero.__exit__(None, None, None)
 
     def _publish_static_changes(self):
         """Tell HERO listeners (the sequencer) about grating / Zernike changes."""
-        hero = getattr(self, "hero", None)
+        hero = getattr(self, "_hero", None)
         if hero is None:
             return
         try:
@@ -88,19 +247,19 @@ class SLMGUI(QtWidgets.QMainWindow):
             print("HERO static_changed publish failed:", e)
 
     def _wire_remote_control(self):
-        self.remote_control = {
+        self._remote_control = {
             "SLM1 x": self.elementary.updateHorizontalGrating,
             "SLM1 y": self.elementary.updateVerticalGrating,
-            "SLM1 pupil 1st axis": self.advanced.apply_pupil_longaxis_byatom_loop,
-            "SLM1 pupil 2st axis": self.advanced.apply_pupil_shortaxis_byatom_loop,
+            "SLM1 pupil 1st axis": self._advanced.apply_pupil_longaxis_byatom_loop,
+            "SLM1 pupil 2st axis": self._advanced.apply_pupil_shortaxis_byatom_loop,
             "SLM1: defocus": self.aberration.updateAberration_defocus,
             "SLM1: asti0": self.aberration.updateAberration_asti0,
             "SLM1: asti45": self.aberration.updateAberration_asti45,
             "SLM1: coma0": self.aberration.updateAberration_coma0,
             "SLM1: coma90": self.aberration.updateAberration_coma90,
             "SLM1: spherical": self.aberration.updateAberration_spherical,
-            "SLM1: TM01 spacing": self.advanced.createTEM01trap,
-            "SLM1: TM01 angle(degree)": self.advanced.createTEM01trap_angle,
+            "SLM1: TM01 spacing": self._advanced.createTEM01trap,
+            "SLM1: TM01 angle(degree)": self._advanced.createTEM01trap_angle,
             "SLM1: trefoil0": self.aberration.updateAberration_trefoil0,
             "SLM1: trefoil90": self.aberration.updateAberration_trefoil90,
             "SLM1: asti2 0": self.aberration.updateAberration_asti2_0,
@@ -120,17 +279,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         ]
 
         for instance_name in save_list:
-            self.state_dict[instance_name] = self.__dict__[instance_name]
+            self._state_dict[instance_name] = self.__dict__[instance_name]
 
-        self.state_dict["TEM01_check"] = self.tem01ChkBx.isChecked()
-        self.state_dict["SO_check"] = self.SOChkBx.isChecked()
-        self.state_dict["LG_check"] = self.LGChkBx.isChecked()
+        self._state_dict["TEM01_check"] = self.tem01ChkBx.isChecked()
+        self._state_dict["SO_check"] = self.SOChkBx.isChecked()
+        self._state_dict["LG_check"] = self.LGChkBx.isChecked()
 
     def dict_to_state(self, memory_dict):
         try:
             self.elementary.createGratingPattern(dx=memory_dict["dx"], dy=memory_dict["dy"])
             self.aberration.updateAberration(aber_list=memory_dict["aberration_values"])
-            self.arbitrary.loadPattern(name=memory_dict["file"])
+            self._arbitrary.loadPattern(name=memory_dict["file"])
 
             self.tem01spacingEdt.setText(str(memory_dict["spacing"]))
             self.tem01ThetaEdt.setText(str(memory_dict["theta_deg"]))
@@ -142,7 +301,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             print(e)
 
     def initSLM(self):
-        self.SLM = SLMDevice(self.selected_SLM, simulate=self.simulate_slm)
+        self.SLM = SLMDevice(self._selected_SLM, simulate=self._simulate_slm)
 
         if getattr(self.SLM, "simulated", False):
             self.setWindowTitle("SLM Controller Petanque [SIMULATE — no hardware]")
@@ -156,34 +315,34 @@ class SLMGUI(QtWidgets.QMainWindow):
             (np.arange(0, Ny, 1) - Ny / 2) * param.pslm,
         )
 
-        self.i_slm, self.j_slm = np.meshgrid(
+        self.i_slm, self._j_slm = np.meshgrid(
             np.arange(Nx),
             np.arange(Ny),
         )
 
         self.deltax = 1
         self.deltay = 1
-        self.epsilon = 0
+        self._epsilon = 0
         self.param_P = self.SLM.parameters.P
 
         self.phasePattern = np.zeros([param.ImgResY, param.ImgResX])
         self.im_grating = np.zeros([param.ImgResY, param.ImgResX])
         self.fresnelPhase = np.zeros([param.ImgResY, param.ImgResX])
 
-        self.zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5
-        self.zernike_theta = np.arctan2(self.X, self.Y)
+        self._zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5
+        self._zernike_theta = np.arctan2(self.X, self.Y)
 
-        self.zernike_pupil_radius = param.max_radius
-        self.zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5 / self.zernike_pupil_radius
+        self._zernike_pupil_radius = param.max_radius
+        self._zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5 / self._zernike_pupil_radius
 
-        self.zernike_coefficients = np.zeros(32).tolist()
+        self._zernike_coefficients = np.zeros(32).tolist()
 
         self.im_zernike = np.zeros([param.ImgResY, param.ImgResX], dtype=np.float64)
 
         self.zernike_polynomials = np.asarray(
-            __zernikepolynomials__(self.zernike_r, self.zernike_theta)
+            __zernikepolynomials__(self._zernike_r, self._zernike_theta)
         )
-        self.zernike_polynomials[:, self.zernike_r > 1] = 0
+        self.zernike_polynomials[:, self._zernike_r > 1] = 0
         self.zernike_polynomials *= 2 * np.pi
 
         self.elementary.createGratingPattern(self.dx, self.dy)
@@ -227,19 +386,19 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.traps_pos = [[]]
         self.traps_k = [[]]
         self.theta_traps = []
-        self.weigth_traps = []
+        self._weigth_traps = []
         self.k_dump = np.array([40, 0]) * 1e-6 * position_to_step_per_pixel
 
         self.spacing = 5.0
         self.theta_deg = -4.0
         self.r_pi = 0.5
 
-        self.theta_traps_list = []
-        self.weight_traps_list = []
+        self._theta_traps_list = []
+        self._weight_traps_list = []
 
         self.file = ""
 
-        self.equalize_iter = 5
+        self._equalize_iter = 5
         self.equalize_gain = 1
         self.GS_maxit = 5
         self.GAA_xi = 0.5
@@ -253,22 +412,25 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.setWindowTitle("SLM Controller Petanque")
         self.createDocks()
         self._install_gui_stdio()
+        # The Output/main height split is applied in resizeEvent (see there).
+        self._dock_ratio_user_set = False
+        self._dock_splitter_connected = False
 
         # Algorithms registered after the arbitrary-arrays panel exists
         self.methodList = {
-            "WGS SLMcorr": lambda: self.arbitrary.WGS(correct_diffraction_efficiency=True),
-            "WGS": lambda: self.arbitrary.WGS(correct_diffraction_efficiency=False),
+            "WGS SLMcorr": lambda: self._arbitrary.WGS(correct_diffraction_efficiency=True),
+            "WGS": lambda: self._arbitrary.WGS(correct_diffraction_efficiency=False),
         }
-        self.arbitrary.methodCB.clear()
+        self._arbitrary.methodCB.clear()
         for key in self.methodList:
-            self.arbitrary.methodCB.addItem(key)
+            self._arbitrary.methodCB.addItem(key)
 
     def createDocks(self):
-        self.d1 = dockarea.Dock("All", size=(700, 700))
-        self.area.addDock(self.d1, "left")
-        self.d1.hideTitleBar()
+        self._d1 = dockarea.Dock("All", size=(700, 700))
+        self.area.addDock(self._d1, "left")
+        self._d1.hideTitleBar()
 
-        self.global_layout = pg.LayoutWidget()
+        self._global_layout = pg.LayoutWidget()
 
         # Left column in its own VBox so Elementary is not stretched to the
         # Arbitrary Arrays row height in the outer grid.
@@ -284,20 +446,20 @@ class SLMGUI(QtWidgets.QMainWindow):
         )
         left_lay.addWidget(elem_frame)
 
-        self.advanced = AdvancedControlPanel(self)
-        adv_frame = framed_panel(self.advanced)
+        self._advanced = AdvancedControlPanel(self)
+        adv_frame = framed_panel(self._advanced)
         adv_frame.setSizePolicy(
             QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
         )
         left_lay.addWidget(adv_frame)
         # Aliases for updatePhase / cross-panel reads
-        self.ManufacturerCorrectionChkBx = self.advanced.ManufacturerCorrectionChkBx
-        self.zernikeCorrectionChkBx = self.advanced.zernikeCorrectionChkBx
-        self.pupilChkBx = self.advanced.pupilChkBx
-        self.pupilEdt = self.advanced.pupilEdt
-        self.pupilCenterEdt_x0 = self.advanced.pupilCenterEdt_x0
-        self.pupilCenterEdt_y0 = self.advanced.pupilCenterEdt_y0
-        self.pupilOutLineEdit = self.advanced.pupilOutLineEdit
+        self._ManufacturerCorrectionChkBx = self._advanced.ManufacturerCorrectionChkBx
+        self._zernikeCorrectionChkBx = self._advanced.zernikeCorrectionChkBx
+        self._pupilChkBx = self._advanced.pupilChkBx
+        self.pupilEdt = self._advanced.pupilEdt
+        self.pupilCenterEdt_x0 = self._advanced.pupilCenterEdt_x0
+        self.pupilCenterEdt_y0 = self._advanced.pupilCenterEdt_y0
+        self.pupilOutLineEdit = self._advanced.pupilOutLineEdit
 
         self.aberration = AberrationControlPanel(self)
         aber_frame = framed_panel(self.aberration)
@@ -309,21 +471,58 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.aber_lineEdit_list = self.aberration.aber_lineEdit_list
 
-        self.global_layout.addWidget(left_col, row=0, col=0, rowspan=2)
+        self._global_layout.addWidget(left_col, row=0, col=0, rowspan=2)
 
-        self.arbitrary = ArbitraryArraysPanel(self)
-        self.global_layout.addWidget(framed_panel(self.arbitrary), row=0, col=1)
+        self._arbitrary = ArbitraryArraysPanel(self)
+        self._global_layout.addWidget(framed_panel(self._arbitrary), row=0, col=1)
 
-        self.preview = LastSentPreviewPanel(self)
-        self.global_layout.addWidget(framed_panel(self.preview), row=1, col=1)
-        self.last_sent_plot = self.preview.last_sent_plot
-        self.last_sent_img_item = self.preview.last_sent_img_item
-        self.last_sent_colorbar = self.preview.last_sent_colorbar
-        self.label_slm_temperature = self.preview.label_slm_temperature
+        self._preview = LastSentPreviewPanel(self)
+        self._global_layout.addWidget(framed_panel(self._preview), row=1, col=1)
+        self._last_sent_plot = self._preview.last_sent_plot
+        self._last_sent_img_item = self._preview.last_sent_img_item
+        self._last_sent_colorbar = self._preview.last_sent_colorbar
+        self._label_slm_temperature = self._preview.label_slm_temperature
 
-        self.d1.addWidget(self.global_layout, row=0, col=0)
+        self._d1.addWidget(self._global_layout, row=0, col=0)
 
-        self.output = OutputDock(self)
+        self._output = OutputDock(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Re-apply the Output/main height split on every window resize until
+        # the user drags the splitter themselves. Deferred so the dock
+        # splitter has already been resized to the new window height.
+        if hasattr(self, "d_output") and not self._dock_ratio_user_set:
+            QtCore.QTimer.singleShot(0, self._apply_dock_ratio)
+
+    def _on_dock_splitter_moved(self, *_):
+        self._dock_ratio_user_set = True
+
+    def _apply_dock_ratio(self):
+        """Give the Output dock OUTPUT_HEIGHT_FRACTION of the dock area height
+        and the rest to the docks above it."""
+        splitter = self.d_output.container()
+        if not isinstance(splitter, QtWidgets.QSplitter):
+            return
+        if not self._dock_splitter_connected:
+            splitter.splitterMoved.connect(self._on_dock_splitter_moved)
+            self._dock_splitter_connected = True
+        i_out = splitter.indexOf(self.d_output)
+        sizes = splitter.sizes()
+        total = sum(sizes)
+        if i_out < 0 or len(sizes) < 2 or total <= 0:
+            return
+        out_h = int(round(total * OUTPUT_HEIGHT_FRACTION))
+        # The main dock may be wrapped in its own container, so give the
+        # remaining height to all other splitter entries proportionally.
+        others = [i for i in range(len(sizes)) if i != i_out]
+        other_total = sum(sizes[i] for i in others) or len(others)
+        rest = total - out_h
+        new_sizes = list(sizes)
+        new_sizes[i_out] = out_h
+        for i in others:
+            new_sizes[i] = int(rest * (sizes[i] or 1) / other_total)
+        splitter.setSizes(new_sizes)
 
     def _install_gui_stdio(self):
         self._stdout_prev = sys.stdout
@@ -351,19 +550,19 @@ class SLMGUI(QtWidgets.QMainWindow):
     def updatePhase(self):
         self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
 
-        if self.ManufacturerCorrectionChkBx.isChecked():
+        if self._ManufacturerCorrectionChkBx.isChecked():
             self.totalPhase = self.totalPhase + self.SLM.correction_pattern
-        if self.zernikeCorrectionChkBx.isChecked():
+        if self._zernikeCorrectionChkBx.isChecked():
             self.totalPhase = self.totalPhase + self.im_zernike
-        if self.pupilChkBx.isChecked():
-            self.advanced.applyPupil()
+        if self._pupilChkBx.isChecked():
+            self._advanced.applyPupil()
 
         self.totalPhase = np.mod(self.totalPhase, 2 * np.pi)
 
         self.totalPhase = np.round(self.param_P * self.totalPhase / (2 * np.pi)).astype("uint8")
         self.SLM.updateArray(self.totalPhase)
         self._publish_static_changes()
-        self.preview._update_last_sent_preview()
+        self._preview._update_last_sent_preview()
 
     def __del__(self):
         plt.close("all")

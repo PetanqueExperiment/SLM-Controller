@@ -1,4 +1,5 @@
 SLM_venv/
+.vscode/
 test.ipynb
 __pycache__/
 SLM_patterns/

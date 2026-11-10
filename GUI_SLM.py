@@ -37,7 +37,7 @@ if __name__ == "__main__":
         hero_name=_args.hero_name,
     )
     slmGui.setWindowIcon(_app_icon)
-    slmGui.show()
+    slmGui.showMaximized()
     try:
         ret = app.exec_()
     except Exception as err:
