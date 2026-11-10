@@ -77,6 +77,16 @@ class SLMGUI(QtWidgets.QMainWindow):
         if hero is not None:
             hero.__exit__(None, None, None)
 
+    def _publish_static_changes(self):
+        """Tell HERO listeners (the sequencer) about grating / Zernike changes."""
+        hero = getattr(self, "hero", None)
+        if hero is None:
+            return
+        try:
+            hero._publish_static_changes()
+        except Exception as e:
+            print("HERO static_changed publish failed:", e)
+
     def _wire_remote_control(self):
         self.remote_control = {
             "SLM1 x": self.elementary.updateHorizontalGrating,
@@ -352,6 +362,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.totalPhase = np.round(self.param_P * self.totalPhase / (2 * np.pi)).astype("uint8")
         self.SLM.updateArray(self.totalPhase)
+        self._publish_static_changes()
         self.preview._update_last_sent_preview()
 
     def __del__(self):

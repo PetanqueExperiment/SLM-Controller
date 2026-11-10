@@ -8,6 +8,10 @@ HERO calls arrive on zenoh worker threads, while all phase updates touch Qt
 widgets and the SLM. Every exposed method is therefore run on the GUI thread
 via ``_GuiInvoker`` and blocks until it is done, so remote callers get the
 return value (or the exception) back.
+
+After every phase update (GUI edit, file load or HERO call) the full set of
+grating and Zernike values is published on the ``static_changed`` event as
+``{param_id: value}`` so the sequencer GUI can mirror it.
 """
 
 from __future__ import annotations
@@ -16,12 +20,21 @@ import threading
 
 from pyqtgraph.Qt import QtCore
 
-from heros import LocalHERO
+from heros import LocalHERO, event
+from heros.event import reliable
 
 HERO_NAME = "SLM_Controller"
 
 GRATING_X = "grating_x"
 GRATING_Y = "grating_y"
+
+
+def static_snapshot(gui) -> dict:
+    """Current ``{param_id: value}`` for every sequencer-visible parameter of ``gui``."""
+    values = {GRATING_X: float(gui.dx), GRATING_Y: float(gui.dy)}
+    for label, v in zip(gui.aberration_label_list, gui.aberration_values):
+        values[label] = float(v)
+    return values
 
 
 class _GuiInvoker(QtCore.QObject):
@@ -64,6 +77,18 @@ class SLMHero(LocalHERO):
         self._invoker = _GuiInvoker()
         # Serialize remote callers: one phase update at a time.
         self._lock = threading.Lock()
+
+    # ---- change notification -------------------------------------------------
+
+    @reliable
+    @event
+    def static_changed(self, values: dict) -> dict:
+        """Event: full ``{param_id: value}`` snapshot, emitted after every phase update."""
+        return values
+
+    def _publish_static_changes(self) -> None:
+        """Emit ``static_changed`` with all current values (GUI thread)."""
+        self.static_changed(static_snapshot(self._gui))
 
     def _on_gui(self, fn, *args, **kwargs):
         with self._lock:
