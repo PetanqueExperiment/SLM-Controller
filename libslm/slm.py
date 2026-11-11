@@ -8,9 +8,9 @@ when opening the device, then :meth:`MeadowlarkSLM.uploadHologram` for each fram
 :meth:`MeadowlarkSLM.disconnect` when shutting down. Per-frame work is only Write_image +
 ImageWriteComplete; Create_SDK / Load_LUT / Delete_SDK run once per session.
 
-For offline GUI testing without hardware, create it with ``simulate=True``
-(e.g. ``GUI_SLM.py --simulate`` / ``Start_SLM_GUI_simulate.bat``). Uploads stay in memory
-and temperature returns a stub value. Simulation is never selected automatically.
+For offline testing without hardware, create it with ``simulate=True`` (the GUI does this when the
+Simulated SLM is selected in the device list). Uploads stay in memory and temperature returns a stub
+value. Simulation is never selected automatically.
 """
 
 from __future__ import annotations

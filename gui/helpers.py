@@ -99,16 +99,13 @@ def application_icon(base_dir: str | None = None) -> QtGui.QIcon:
 
 
 def parse_launch_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """CLI flags: offline testing without Meadowlark hardware, HERO options."""
+    """CLI flags: HERO options. (Simulate mode is chosen by selecting the Simulated SLM in the device list.)"""
     parser = argparse.ArgumentParser(description="SLM Controller Petanque")
-    parser.add_argument(
-        "--simulate", action="store_true", help="Run without Blink SDK / SLM hardware (patterns stay in memory)."
-    )
     parser.add_argument(
         "--no-hero", action="store_true", help="Do not expose the GUI as a HERO (remote grating / Zernike control)."
     )
     parser.add_argument(
-        "--hero-name", default=None, help="HERO name (default: SLM_Controller, SLM_Controller_sim with --simulate)."
+        "--hero-name", default=None, help="HERO name (default: SLM_Controller, SLM_Controller_sim when the profile's SLM is the Simulated SLM)."
     )
     args, _unknown = parser.parse_known_args(argv)
     return args

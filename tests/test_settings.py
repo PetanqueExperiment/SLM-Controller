@@ -8,13 +8,17 @@ from gui import settings
 from gui.settings import AppSettings, Device, addDevice, findDevice, loadDevices, parseBoard, saveDevices, setDeviceSerial
 
 
-@pytest.mark.parametrize("value, expected", [(1, 1), (3, 3), (0, None), (-2, None), (True, None), (1.0, None), ("1", None), (None, None)])
+@pytest.mark.parametrize("value, expected", [(1, 1), (3, 3), (0, 0), (-2, None), (True, None), (1.0, None), ("1", None), (None, None)])
 def test_parse_board(value, expected):
     assert parseBoard(value) == expected
 
 
-def test_load_devices_missing_file_is_empty(tmp_path):
-    assert loadDevices(tmp_path / "devices.json") == []
+SIM = Device(settings.SIMULATED_BOARD)
+
+
+def test_load_devices_missing_file_has_only_the_simulated_slm(tmp_path):
+    assert loadDevices(tmp_path / "devices.json") == [SIM]
+    assert SIM.simulated and settings.deviceLabel(SIM) == "Simulated SLM" and settings.deviceLabel(Device(2)) == "Board 2"
 
 
 def test_add_device_creates_file_and_rejects_duplicates(tmp_path):
@@ -22,7 +26,7 @@ def test_add_device_creates_file_and_rejects_duplicates(tmp_path):
     assert addDevice(2, path) is True
     assert addDevice(1, path) is True
     assert addDevice(2, path) is False
-    assert loadDevices(path) == [Device(1), Device(2)]
+    assert loadDevices(path) == [SIM, Device(1), Device(2)]
     assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1}, {"board": 2}]}
 
 
@@ -39,27 +43,35 @@ def test_set_device_serial_and_find(tmp_path):
 def test_save_devices_sorts_and_deduplicates(tmp_path):
     path = tmp_path / "devices.json"
     saveDevices([Device(3), Device(1, 7), Device(3, 9)], path)
-    assert loadDevices(path) == [Device(1, 7), Device(3)]
+    assert loadDevices(path) == [SIM, Device(1, 7), Device(3)]
 
 
 def test_load_devices_old_format_without_serial(tmp_path):
     path = tmp_path / "devices.json"
     path.write_text(json.dumps({"devices": [{"board": 1}]}), encoding="utf-8")
-    assert loadDevices(path) == [Device(1, None)]
+    assert loadDevices(path) == [SIM, Device(1, None)]
 
 
 def test_load_devices_skips_invalid_entries(tmp_path):
     path = tmp_path / "devices.json"
-    entries = [{"board": 1, "serial": 6801}, {"board": "x"}, {"board": 0}, 5, {}, {"board": 4, "serial": -1}, {"board": 1, "serial": 2}, {"board": 6, "serial": True}]
+    entries = [{"board": 1, "serial": 6801}, {"board": "x"}, {"board": 0, "serial": 9}, {"board": -1}, 5, {}, {"board": 4, "serial": -1}, {"board": 1, "serial": 2}, {"board": 6, "serial": True}]
     path.write_text(json.dumps({"devices": entries}), encoding="utf-8")
-    assert loadDevices(path) == [Device(1, 6801), Device(4, None), Device(6, None)]
+    assert loadDevices(path) == [SIM, Device(1, 6801), Device(4, None), Device(6, None)]
 
 
 @pytest.mark.parametrize("content", ["not json", "[1, 2]", '{"devices": {"board": 1}}'])
 def test_load_devices_bad_file_is_empty(tmp_path, content):
     path = tmp_path / "devices.json"
     path.write_text(content, encoding="utf-8")
-    assert loadDevices(path) == []
+    assert loadDevices(path) == [SIM]
+
+
+def test_simulated_slm_is_permanent_and_never_written(tmp_path):
+    path = tmp_path / "devices.json"
+    assert addDevice(settings.SIMULATED_BOARD, path) is False
+    saveDevices([SIM, Device(2)], path)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 2}]}
+    assert findDevice(settings.SIMULATED_BOARD, path) == SIM
 
 
 @pytest.mark.parametrize("value, expected", [(0, 0), (6801, 6801), (-1, None), (True, None), ("6801", None), (None, None), (1.5, None)])

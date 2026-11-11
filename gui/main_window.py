@@ -15,7 +15,7 @@ import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError
 from gui.defaults import DEFAULT_PROFILE, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
-from gui.settings import PROFILE_LOADED, PROFILE_MISSING, AppSettings, Device, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, readProfile, restoreDefaultProfile, setDeviceSerial, writeProfile
+from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, readProfile, restoreDefaultProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -24,6 +24,7 @@ from gui.panels.aberration import AberrationControlPanel
 from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
 from gui.panels.output import OutputDock
+from gui.panels.slm_info import SlmInfoDock
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
 import libslm.parameters as param
@@ -33,9 +34,13 @@ if TYPE_CHECKING:
     from gui.temperature_log import DailyTemperatureLog
 
 
-# Fraction of the window height given to the bottom Output (log) dock;
+# Fraction of the window height given to the bottom Output (log) dock and to the top SLM info dock;
 # the remaining height goes to the main "All" dock.
 OUTPUT_HEIGHT_FRACTION: float = 0.10
+SLM_INFO_HEIGHT_FRACTION: float = 0.02
+
+# Gap between panels [px]: between the left-column panels, between the docks (splitter handles) and above the SLM strip.
+PANEL_GAP_PX: int = 4
 
 
 class SLMMode:
@@ -59,7 +64,6 @@ class Rearranger(SLMMode):
 class SLMGUI(QtWidgets.QMainWindow):
     # --- Construction / device ---
     parent: Any  # optional owner passed to __init__ (only set if given)
-    _simulate_slm: bool
     SLM: Optional[MeadowlarkSLM]  # None when no SLM is connected
     board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
@@ -141,6 +145,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     _arbitrary: ArbitraryArraysPanel
     _preview: LastSentPreviewPanel
     _output: OutputDock
+    _slm_info: SlmInfoDock  # top dock: board, serial number, connection state
     _dock_ratio_user_set: bool
     _dock_splitter_connected: bool
     top_menu_bar: QtWidgets.QToolBar
@@ -177,6 +182,8 @@ class SLMGUI(QtWidgets.QMainWindow):
     # --- Set on this object by the panels (not in __init__) ---
     # Output dock (gui/panels/output.py)
     d_output: dockarea.Dock
+    # SLM info dock (gui/panels/slm_info.py)
+    d_slm_info: dockarea.Dock
     output_log: QtWidgets.QPlainTextEdit
     btn_clear_output_log: QtWidgets.QPushButton
     # Advanced panel (gui/panels/advanced.py)
@@ -199,13 +206,12 @@ class SLMGUI(QtWidgets.QMainWindow):
     _slm_temp_timer: QtCore.QTimer
     _temp_log_error_reported: bool
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, simulate: bool = False, start_hero: bool = False, hero_name: Optional[str] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, start_hero: bool = False, hero_name: Optional[str] = None) -> None:
         super(SLMGUI, self).__init__()
 
         if parent:
             self.parent = parent
 
-        self._simulate_slm = bool(simulate)
         self._remote_control = {}
 
         self._state_dict = {}
@@ -251,7 +257,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             print("HERO disabled (heros not installed):", e)
             return
         if name is None:
-            name = HERO_NAME + ("_sim" if self._simulate_slm else "")
+            name = HERO_NAME + ("_sim" if self.board == SIMULATED_BOARD else "")
         try:
             self._hero = SLMHero(self, name)
             print("HERO started:", name)
@@ -322,24 +328,25 @@ class SLMGUI(QtWidgets.QMainWindow):
     def connectSLM(self, board: int) -> bool:
         """Connect to the SLM on ``board`` and upload the current hologram. On failure the GUI keeps running without an SLM."""
         if self.SLM is not None:
-            print(f"Already connected to the SLM on board {self.board}")
+            print(f"Already connected: {self._boardLabel(self.board)}")
             return False
+        name = self._boardLabel(board)
         device = findDevice(board)
         expected = None if device is None else device.serial
         try:
-            slm = MeadowlarkSLM(board, simulate=self._simulate_slm, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
             slm.connect()
         except SerialMismatchError as e:
             print(f"Connection aborted: {e} Nothing was sent to the SLM.")
             return False
         except Exception as e:
-            print(f"Could not connect to the SLM on board {board}: {e}")
-            QtWidgets.QMessageBox.warning(self, "SLM not connected", f"Could not connect to the SLM on board {board}:\n{e}\n\nThe GUI runs without an SLM.")
+            print(f"Could not connect to {name}: {e}")
+            QtWidgets.QMessageBox.warning(self, "SLM not connected", f"Could not connect to {name}:\n{e}\n\nThe GUI runs without an SLM.")
             return False
         self.SLM = slm
         self.board = board
         self._updateWindowTitle()
-        print(f"Connected to the SLM on board {board}")
+        print(f"Connected to {name}")
         self._checkSerial(device, slm.serial)
         self.updatePhase()
         return True
@@ -378,10 +385,13 @@ class SLMGUI(QtWidgets.QMainWindow):
         if self.SLM is None:
             state = "no SLM connected"
         elif self.SLM.simulate:
-            state = f"board {self.board}, SIMULATE — no hardware"
+            state = "Simulated SLM — no hardware"
         else:
             state = f"board {self.board}"
         self.setWindowTitle(f"SLM Controller Petanque — profile: {self.current_profile} [{state}]")
+        slm_info = getattr(self, "_slm_info", None)
+        if slm_info is not None:
+            slm_info.update()
 
     def isSLMConnected(self) -> bool:
         """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
@@ -538,7 +548,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         """Device ▸ Disconnect: close the SLM session after confirmation; the GUI keeps running without an SLM."""
         if self.SLM is None:
             return
-        text = f"Disconnect the SLM on board {self.board}?\n\nHolograms will no longer be sent until you connect again (Device ▸ Connect…)."
+        text = f"Disconnect {self._boardLabel(self.board)}?\n\nHolograms will no longer be sent until you connect again (Device ▸ Connect…)."
         if QtWidgets.QMessageBox.question(self, "Disconnect", text) != QtWidgets.QMessageBox.Yes:
             return
         self.disconnectSLM()
@@ -550,26 +560,27 @@ class SLMGUI(QtWidgets.QMainWindow):
             try:
                 slm.disconnect()
             except Exception as e:
-                print(f"Error while disconnecting the SLM on board {self.board}: {e}")
-            print(f"Disconnected the SLM on board {self.board}")
+                print(f"Error while disconnecting {self._boardLabel(self.board)}: {e}")
+            print(f"Disconnected {self._boardLabel(self.board)}")
         self._updateWindowTitle()
 
     @staticmethod
     def _boardLabel(board: int) -> str:
-        return f"Board {board}"
+        return deviceLabel(Device(board))
 
-    @classmethod
-    def _deviceLabel(cls, device: Device) -> str:
-        return f"{cls._boardLabel(device.board)}  (SN {'not known yet' if device.serial is None else device.serial})"
+    @staticmethod
+    def _deviceLabel(device: Device) -> str:
+        if device.simulated:
+            return deviceLabel(device)
+        return f"{deviceLabel(device)}  (SN {'not known yet' if device.serial is None else device.serial})"
 
     def _showDevices(self) -> None:
         devices = loadDevices()
         boards = [d.board for d in devices]
-        if devices:
-            lines = [self._deviceLabel(d) + ("   ← connected" if self.SLM is not None and d.board == self.board else "") for d in devices]
-            text = "\n".join(lines)
-        else:
-            text = "No SLM in the device list yet.\nUse Device ▸ Add device."
+        lines = [self._deviceLabel(d) + ("   ← connected" if self.SLM is not None and d.board == self.board else "") for d in devices]
+        text = "\n".join(lines)
+        if not any(not d.simulated for d in devices):
+            text += "\n\nNo real SLM in the device list yet: use Device ▸ Add device."
         if self.SLM is not None and self.board not in boards:
             text += f"\n\nConnected: {self._boardLabel(self.board)} (not in the list)"
         QtWidgets.QMessageBox.information(self, "Devices", f"{text}\n\nThe serial number is recorded the first time a device is connected.\nList file: {DEVICES_FILE}")
@@ -596,14 +607,10 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         devices = loadDevices()
         boards = [d.board for d in devices]
-        if not boards:
-            answer = QtWidgets.QMessageBox.question(self, "Connect", "No SLM is in the device list yet.\nAdd one now?")
-            board = self._addDeviceDialog() if answer == QtWidgets.QMessageBox.Yes else None
-        else:
-            labels = [self._deviceLabel(d) for d in devices]
-            current = boards.index(self.board) if self.board in boards else 0
-            label, ok = QtWidgets.QInputDialog.getItem(self, "Connect", "SLM to connect to:", labels, current, False)
-            board = boards[labels.index(label)] if ok else None
+        labels = [self._deviceLabel(d) for d in devices]
+        current = boards.index(self.board) if self.board in boards else 0
+        label, ok = QtWidgets.QInputDialog.getItem(self, "Connect", "SLM to connect to (Simulated SLM = no hardware):", labels, current, False)
+        board = boards[labels.index(label)] if ok else None
         if board is not None:
             self.connectSLM(board)
 
@@ -796,8 +803,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         board = parseBoard(params.get("board"))
         connected = self.isSLMConnected()
         if connected and board is not None and board != self.board:
-            print(f"Profile {name!r} not loaded: it is for board {board}, the connected SLM is on board {self.board}")
-            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} is for the SLM on board {board}, but the connected SLM is on board {self.board}.\n\nOnly profiles for the connected SLM can be loaded.")
+            print(f"Profile {name!r} not loaded: it is for {self._boardLabel(board)}, the connected SLM is {self._boardLabel(self.board)}")
+            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} is for {self._boardLabel(board)}, but the connected SLM is {self._boardLabel(self.board)}.\n\nOnly profiles for the connected SLM can be loaded.")
             return
         try:
             self.saveProfile()
@@ -814,7 +821,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         except OSError as e:
             print("Could not save settings:", e)
         self._updateWindowTitle()
-        hint = "" if connected or self.board is None else f" (board {self.board}: Device ▸ Connect… to connect)"
+        hint = "" if connected or self.board is None else f" ({self._boardLabel(self.board)}: Device ▸ Connect… to connect)"
         print(f"Loaded profile {name!r}{hint}")
 
     def _duplicateProfileDialog(self) -> None:
@@ -856,7 +863,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         left_col = QtWidgets.QWidget()
         left_lay = QtWidgets.QVBoxLayout(left_col)
         left_lay.setContentsMargins(0, 0, 0, 0)
-        left_lay.setSpacing(4)
+        left_lay.setSpacing(PANEL_GAP_PX)
 
         self.elementary = ElementaryControlPanel(self)
         elem_frame = framed_panel(self.elementary)
@@ -899,10 +906,15 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._d1.addWidget(self._global_layout, row=0, col=0)
 
         self._output = OutputDock(self)
+        self._slm_info = SlmInfoDock(self)
+        dock_splitter = self.d_output.container()
+        if isinstance(dock_splitter, QtWidgets.QSplitter):
+            dock_splitter.setHandleWidth(PANEL_GAP_PX)
+        self.area.layout.setContentsMargins(0, PANEL_GAP_PX, 0, 0)  # gap between the top menu and the SLM strip
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
-        # Re-apply the Output/main height split on every window resize until
+        # Re-apply the SLM info / main / Output height split on every window resize until
         # the user drags the splitter themselves. Deferred so the dock
         # splitter has already been resized to the new window height.
         if hasattr(self, "d_output") and not self._dock_ratio_user_set:
@@ -912,27 +924,27 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._dock_ratio_user_set = True
 
     def _apply_dock_ratio(self) -> None:
-        """Give the Output dock OUTPUT_HEIGHT_FRACTION of the dock area height
-        and the rest to the docks above it."""
+        """Give the SLM info dock SLM_INFO_HEIGHT_FRACTION and the Output dock OUTPUT_HEIGHT_FRACTION of the
+        dock area height, and the rest to the docks between them."""
         splitter = self.d_output.container()
         if not isinstance(splitter, QtWidgets.QSplitter):
             return
         if not self._dock_splitter_connected:
             splitter.splitterMoved.connect(self._on_dock_splitter_moved)
             self._dock_splitter_connected = True
-        i_out = splitter.indexOf(self.d_output)
         sizes = splitter.sizes()
         total = sum(sizes)
-        if i_out < 0 or len(sizes) < 2 or total <= 0:
+        fixed = {splitter.indexOf(dock): fraction for dock, fraction in ((self.d_output, OUTPUT_HEIGHT_FRACTION), (getattr(self, "d_slm_info", None), SLM_INFO_HEIGHT_FRACTION)) if dock is not None and splitter.indexOf(dock) >= 0}
+        if splitter.indexOf(self.d_output) < 0 or len(sizes) < 2 or total <= 0:
             return
-        out_h = int(round(total * OUTPUT_HEIGHT_FRACTION))
+        new_sizes = list(sizes)
+        for i, fraction in fixed.items():
+            new_sizes[i] = int(round(total * fraction))
         # The main dock may be wrapped in its own container, so give the
         # remaining height to all other splitter entries proportionally.
-        others = [i for i in range(len(sizes)) if i != i_out]
+        others = [i for i in range(len(sizes)) if i not in fixed]
         other_total = sum(sizes[i] for i in others) or len(others)
-        rest = total - out_h
-        new_sizes = list(sizes)
-        new_sizes[i_out] = out_h
+        rest = total - sum(new_sizes[i] for i in fixed)
         for i in others:
             new_sizes[i] = int(rest * (sizes[i] or 1) / other_total)
         splitter.setSizes(new_sizes)

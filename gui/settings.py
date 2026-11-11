@@ -165,9 +165,12 @@ def listProfiles() -> list[str]:
     return sorted(p.stem for p in PROFILE_DIR.glob("*.json"))
 
 
+SIMULATED_BOARD: int = 0  # reserved "board" of the permanent Simulated SLM; real Blink boards are numbered from 1
+
+
 def parseBoard(value: Any) -> int | None:
-    """Board number from a JSON value: a positive int (bools and other types are rejected)."""
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    """Board number from a JSON value: SIMULATED_BOARD or a positive int (bools and other types are rejected)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < SIMULATED_BOARD:
         return None
     return value
 
@@ -181,26 +184,34 @@ def parseSerial(value: Any) -> int | None:
 
 @dataclass
 class Device:
-    """One SLM in ``devices/devices.json``: the Blink board it is on and, once known, its serial number."""
+    """One SLM: the Blink board it is on and, once known, its serial number. Board SIMULATED_BOARD is the Simulated SLM."""
 
     board: int
     serial: int | None = None
+
+    @property
+    def simulated(self) -> bool:
+        return self.board == SIMULATED_BOARD
 
     def toDict(self) -> dict[str, Any]:
         return {"board": self.board} if self.serial is None else {"board": self.board, "serial": self.serial}
 
 
 def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
-    """Devices listed in ``devices/devices.json``, sorted by board (invalid entries dropped; first entry wins per board)."""
+    """The Simulated SLM (always first), then the devices in ``devices/devices.json`` sorted by board.
+
+    Invalid entries are dropped and the first entry wins per board. The Simulated SLM is permanent: it is never read
+    from or written to the file.
+    """
+    devices: dict[int, Device] = {SIMULATED_BOARD: Device(SIMULATED_BOARD)}
     doc = _read_json(path) or {}
     entries = doc.get("devices", [])
     if not isinstance(entries, list):
         print(f"Ignoring 'devices' in {path}: expected a list")
-        return []
-    devices: dict[int, Device] = {}
+        entries = []
     for entry in entries:
         board = parseBoard(entry.get("board")) if isinstance(entry, dict) else None
-        if board is None:
+        if board is None or board == SIMULATED_BOARD:
             print(f"Ignoring invalid device entry in {path}: {entry!r}")
             continue
         if board in devices:
@@ -214,7 +225,8 @@ def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
 
 
 def saveDevices(devices: list[Device], path: Path = DEVICES_FILE) -> None:
-    unique = {d.board: d for d in reversed(devices)}
+    """Write the real devices (the Simulated SLM is not stored)."""
+    unique = {d.board: d for d in reversed(devices) if not d.simulated}
     _write_json(path, {"devices": [unique[b].toDict() for b in sorted(unique)]})
 
 
@@ -229,6 +241,11 @@ def addDevice(board: int, path: Path = DEVICES_FILE) -> bool:
         return False
     saveDevices(devices + [Device(board)], path)
     return True
+
+
+def deviceLabel(device: Device) -> str:
+    """Name shown in the GUI: 'Simulated SLM' or 'Board N'."""
+    return "Simulated SLM" if device.simulated else f"Board {device.board}"
 
 
 def setDeviceSerial(board: int, serial: int, path: Path = DEVICES_FILE) -> bool:

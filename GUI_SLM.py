@@ -32,7 +32,6 @@ if __name__ == "__main__":
     app.setWindowIcon(_app_icon)
 
     slmGui = SLMGUI(
-        simulate=_args.simulate,
         start_hero=not _args.no_hero,
         hero_name=_args.hero_name,
     )
