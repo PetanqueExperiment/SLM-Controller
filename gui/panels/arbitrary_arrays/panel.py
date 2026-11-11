@@ -1,7 +1,7 @@
 """Arbitrary Arrays panel: widgets and button handlers.
 
 The work is done in the modules next to this one: rois.py (rois.json files), tweezer_array.py (lattice geometry),
-traps.py (k-vectors / phases / pupils), algorithms.py (WGS, GS), hologram_files.py (Save / Load Hologram),
+traps.py (k-vectors / phases / pupils), gui/hologram_generator.py (WGS, GS), gui/hologram_handler.py (Save / Load Hologram),
 trap_plot.py (Plot traps file), equalization.py (dormant atom equalization) and legacy.py (old unused code).
 """
 
@@ -18,10 +18,11 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import SLM_PATTERNS_DIR, SYSTEM_MAGNIFICATION, TWEEZER_ROIS_DIR
-from gui.helpers import parse_pasted_coordinates
-from gui.panels.arbitrary_arrays import algorithms, rois
+from gui.helpers import framed_panel, parse_pasted_coordinates
+from gui import hologram_generator
+from gui.panels.arbitrary_arrays import rois
 from gui.panels.arbitrary_arrays.equalization import EqualizationMixin
-from gui.panels.arbitrary_arrays.hologram_files import readLegacyPattern, readTrapsDict, writeTrapsDict
+from gui.hologram_handler import readLegacyPattern, readTrapsDict, writeTrapsDict
 from gui.panels.arbitrary_arrays.legacy import LegacyAlgorithmsMixin
 from gui.panels.arbitrary_arrays.trap_plot import plotTrapsFile
 from gui.panels.arbitrary_arrays.traps import trapArrays
@@ -29,6 +30,10 @@ from gui.panels.arbitrary_arrays.tweezer_array import coords_npy_to_traps_pos, r
 
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI
+
+# Width split of the two panels: trap tools (left) and the combined hologram generator / hologram files panel (right).
+ARBITRARY_ARRAYS_WIDTH_FRACTION: float = 0.5
+HOLOGRAM_PANEL_WIDTH_FRACTION: float = 1.0 - ARBITRARY_ARRAYS_WIDTH_FRACTION
 
 
 def _pump_gui() -> None:
@@ -49,14 +54,23 @@ def _pump_gui() -> None:
 class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None, gap_px: int = 4) -> None:
         super().__init__(parent)
         self.gui = gui
         self._build()
-        lay = QtWidgets.QVBoxLayout(self)
+        # Two framed panels side by side: trap tools (left) | hologram generator + hologram files combined (right).
+        hologram = QtWidgets.QWidget()
+        hologram_lay = QtWidgets.QVBoxLayout(hologram)
+        hologram_lay.setContentsMargins(0, 0, 0, 0)
+        hologram_lay.setSpacing(gap_px)
+        hologram_lay.addWidget(self.generator_root)
+        hologram_lay.addWidget(self.files_root)
+        hologram_lay.addStretch(1)
+        lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self.root)
+        lay.setSpacing(gap_px)
+        lay.addWidget(framed_panel(self.root), round(100 * ARBITRARY_ARRAYS_WIDTH_FRACTION))
+        lay.addWidget(framed_panel(hologram), round(100 * HOLOGRAM_PANEL_WIDTH_FRACTION))
 
     def _build(self) -> None:
         """Build the ARBITRARY ARRAYS column (`self.arbitrary_arrays_panel`): patterns, traps, lattice export, algorithms."""
@@ -115,11 +129,6 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         self.arbitrary_arrays_panel.addWidget(self.label_Layout_Arbitrary_Array, row=line_idx, colspan=3)
 
         line_idx += 1
-        self.arbitrary_arrays_panel.addWidget(self.generateBlankBtn, row=line_idx, col=0)
-        self.arbitrary_arrays_panel.addWidget(self.loadBtn, row=line_idx, col=1)
-        self.arbitrary_arrays_panel.addWidget(self.saveBtn, row=line_idx, col=2)
-
-        line_idx += 1
         self.arbitrary_arrays_panel.addWidget(self.coordsToJsonBtn, row=line_idx, col=0)
         self.arbitrary_arrays_panel.addWidget(self.pastedCoordsEdt, row=line_idx, col=1, colspan=2)
         self.arbitrary_arrays_panel.addWidget(self.pastedCoordsUnitsCB, row=line_idx, col=3)
@@ -155,10 +164,22 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         self.arbitrary_arrays_panel.addWidget(self.loadTrapPositionsEdt, row=line_idx, col=2)
         self.arbitrary_arrays_panel.addWidget(self.plotTrapsBtn, row=line_idx, col=3)
 
-        line_idx += 1
-        self.arbitrary_arrays_panel.addWidget(self.runBtn, row=line_idx, col=0)
-        self.arbitrary_arrays_panel.addWidget(self.methodCB, row=line_idx, col=1)
-        self.arbitrary_arrays_panel.addWidget(self.iterationsEdit, row=line_idx, col=2)
+        # Hologram generator (gui/hologram_generator.py) and hologram files (gui/hologram_handler.py): own panels below
+        self.generator_root = pg.LayoutWidget()
+        self.label_hologram_generator = QtWidgets.QLabel(""" -- HOLOGRAM GENERATOR -- """)
+        self.label_hologram_generator.setAlignment(QtCore.Qt.AlignCenter)
+        self.generator_root.addWidget(self.label_hologram_generator, row=0, col=0, colspan=3)
+        self.generator_root.addWidget(self.runBtn, row=1, col=0)
+        self.generator_root.addWidget(self.methodCB, row=1, col=1)
+        self.generator_root.addWidget(self.iterationsEdit, row=1, col=2)
+
+        self.files_root = pg.LayoutWidget()
+        self.label_hologram_files = QtWidgets.QLabel(""" -- HOLOGRAM FILES -- """)
+        self.label_hologram_files.setAlignment(QtCore.Qt.AlignCenter)
+        self.files_root.addWidget(self.label_hologram_files, row=0, col=0, colspan=3)
+        self.files_root.addWidget(self.generateBlankBtn, row=1, col=0)
+        self.files_root.addWidget(self.loadBtn, row=1, col=1)
+        self.files_root.addWidget(self.saveBtn, row=1, col=2)
 
         # line_idx += 1
         # self.arbitrary_arrays_panel.addWidget(self.equalize_with_atoms_Btn, row=line_idx, col=0)
@@ -218,7 +239,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
     def computeHologram(self) -> np.ndarray | None:
         if not self._ensure_traps_loaded():
             return None
-        return algorithms.computeHologram(self.gui.traps_k, self.gui.theta_traps, self.gui.weight_traps, self.gui.pupil_traps, self.gui.SLM_shape)
+        return hologram_generator.computeHologram(self.gui.traps_k, self.gui.theta_traps, self.gui.weight_traps, self.gui.pupil_traps, self.gui.SLM_shape)
 
     def WGS(self, correct_diffraction_efficiency: bool = False) -> np.ndarray | None:
         '''
@@ -228,7 +249,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         _pump_gui()
         if not self._ensure_traps_loaded():
             return None
-        result = algorithms.wgs(self.gui.traps_pos, self.gui.traps_k, self.gui.theta_traps, self.gui.weight_traps, self.gui.pupil_traps, self.gui.SLM_shape, int(self.iterationsEdit.text()), self.gui.dx, self.gui.dy, correct_diffraction_efficiency, progress=_pump_gui)
+        result = hologram_generator.wgs(self.gui.traps_pos, self.gui.traps_k, self.gui.theta_traps, self.gui.weight_traps, self.gui.pupil_traps, self.gui.SLM_shape, int(self.iterationsEdit.text()), self.gui.dx, self.gui.dy, correct_diffraction_efficiency, progress=_pump_gui)
         if result is None:
             return None
         phi, self.gui.theta_traps, self.gui.weight_traps = result
@@ -241,7 +262,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         print('Starting Gerchberg-Saxton calculation')
         if not self._ensure_traps_loaded():
             return None
-        phi, self.gui.theta_traps, self.gui.weight_traps = algorithms.gs(self.gui.traps_k, self.gui.pupil_traps, self.gui.SLM_shape, int(self.iterationsEdit.text()), progress=_pump_gui)
+        phi, self.gui.theta_traps, self.gui.weight_traps = hologram_generator.gs(self.gui.traps_k, self.gui.pupil_traps, self.gui.SLM_shape, int(self.iterationsEdit.text()), progress=_pump_gui)
         return phi
 
     # ==============================================================================

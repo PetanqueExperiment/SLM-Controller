@@ -1,4 +1,4 @@
-"""Info strip (top of the window): active profile (left, 20%) and the SLM's board, serial number and state (right, 80%)."""
+"""Info strip (top of the window): active profile (20%), the SLM's board, serial number and state (70%), temperature (10%)."""
 
 from __future__ import annotations
 
@@ -12,16 +12,18 @@ from gui.settings import SIMULATED_BOARD, findDevice
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI
 
-PROFILE_WIDTH_STRETCH: int = 1  # profile : SLM width ratio = 1 : 4 → 20 % : 80 %
-SLM_WIDTH_STRETCH: int = 4
+# Width split of the info strip: profile | SLM info | temperature.
+PROFILE_WIDTH_FRACTION: float = 0.2
+TEMPERATURE_WIDTH_FRACTION: float = 0.1
+SLM_WIDTH_FRACTION: float = 1.0 - PROFILE_WIDTH_FRACTION - TEMPERATURE_WIDTH_FRACTION
 
 
-def _infoPanel() -> tuple[QtWidgets.QFrame, QtWidgets.QLabel]:
-    """A bordered panel (same look as the other GUI panels) holding one line of selectable text."""
+def _infoPanel(label: QtWidgets.QLabel | None = None) -> tuple[QtWidgets.QFrame, QtWidgets.QLabel]:
+    """A bordered panel (same look as the other GUI panels) holding one line of selectable text (a new or given label)."""
     frame = QtWidgets.QFrame()
     frame.setObjectName("info_panel_frame")
     frame.setStyleSheet("#info_panel_frame { border: 1px solid #8a8a8a; border-radius: 4px; background: transparent; }")
-    label = QtWidgets.QLabel()
+    label = QtWidgets.QLabel() if label is None else label
     label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
     lay = QtWidgets.QHBoxLayout(frame)
     lay.setContentsMargins(6, 0, 6, 0)
@@ -38,7 +40,7 @@ class SlmInfoDock:
 
     def _build(self, gap_px: int) -> None:
         self.gui.d_slm_info = dockarea.Dock("SLM", size=(800, 20))
-        self.gui.d_slm_info.nStyle = "Dock > QWidget { border: none; }"  # only the two panels draw a border, not the dock
+        self.gui.d_slm_info.nStyle = "Dock > QWidget { border: none; }"  # only the panels draw a border, not the dock
         self.gui.d_slm_info.hideTitleBar()
         row = QtWidgets.QWidget()
         lay = QtWidgets.QHBoxLayout(row)
@@ -46,8 +48,12 @@ class SlmInfoDock:
         lay.setSpacing(gap_px)
         profile_frame, self.profile_label = _infoPanel()
         slm_frame, self.label = _infoPanel()
-        lay.addWidget(profile_frame, PROFILE_WIDTH_STRETCH)
-        lay.addWidget(slm_frame, SLM_WIDTH_STRETCH)
+        lay.addWidget(profile_frame, round(100 * PROFILE_WIDTH_FRACTION))
+        lay.addWidget(slm_frame, round(100 * SLM_WIDTH_FRACTION))
+        temperature = getattr(self.gui, "_label_slm_temperature", None)  # created and refreshed by the preview panel
+        if temperature is not None:
+            temperature_frame, _ = _infoPanel(temperature)
+            lay.addWidget(temperature_frame, round(100 * TEMPERATURE_WIDTH_FRACTION))
         self.gui.d_slm_info.addWidget(row)
         self.gui.d_slm_info.layout.setContentsMargins(0, 0, 0, 0)
         self.gui.area.addDock(self.gui.d_slm_info, "top")

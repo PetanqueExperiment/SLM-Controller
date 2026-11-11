@@ -40,11 +40,8 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.label_last_sent_preview = QtWidgets.QLabel("Last hologram sent to SLM")
         self.label_last_sent_preview.setAlignment(QtCore.Qt.AlignCenter)
 
-        self.label_slm_temperature = QtWidgets.QLabel("SLM temperature: —")
-        self.label_slm_temperature.setAlignment(QtCore.Qt.AlignCenter)
-        _temp_font = self.label_slm_temperature.font()
-        _temp_font.setBold(True)
-        self.label_slm_temperature.setFont(_temp_font)
+        # Updated here every second, shown in the SLM info strip at the top (gui/panels/slm_info.py).
+        self.label_slm_temperature = QtWidgets.QLabel("Temp: —")
 
         try:
             _grey_cmap = pg.colormap.get("grey", source="matplotlib", skipCache=True)
@@ -158,7 +155,6 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.last_sent_preview_layout.addWidget(self.last_sent_plot, row=1, col=0)
         self.last_sent_preview_layout.addWidget(self.ft_plot, row=1, col=1)
         self.last_sent_preview_layout.addWidget(self.ft_levels_row, row=2, col=1)
-        self.last_sent_preview_layout.addWidget(self.label_slm_temperature, row=3, col=0, colspan=2)
 
     def _start_slm_temperature_monitor(self) -> None:
         """Poll Read_SLM_temperature once per second and log each sample (not in simulate mode)."""
@@ -173,17 +169,21 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
     def _refresh_slm_temperature(self) -> None:
         slm = getattr(self.gui, "SLM", None)
         if slm is None:
-            self.label_slm_temperature.setText("SLM temperature: —")
+            self.label_slm_temperature.setText("Temp: —")
+            self.label_slm_temperature.setToolTip("SLM temperature: no SLM connected")
             return
         try:
             temp_c = slm.readTemperature()
         except Exception:
-            self.label_slm_temperature.setText("SLM temperature: unavailable")
+            self.label_slm_temperature.setText("Temp: unavailable")
+            self.label_slm_temperature.setToolTip("SLM temperature could not be read")
             return
         if slm.simulate:
-            self.label_slm_temperature.setText(f"SLM temperature: {temp_c:.1f} °C (simulated, not logged)")
+            self.label_slm_temperature.setText(f"Temp: {temp_c:.1f} °C (sim)")
+            self.label_slm_temperature.setToolTip("SLM temperature of the Simulated SLM (fixed stub value, not logged)")
             return
-        self.label_slm_temperature.setText(f"SLM temperature: {temp_c:.1f} °C")
+        self.label_slm_temperature.setText(f"Temp: {temp_c:.1f} °C")
+        self.label_slm_temperature.setToolTip("SLM temperature, read every second and logged")
         try:
             self.gui._temperature_log.append(temp_c)
         except Exception as exc:

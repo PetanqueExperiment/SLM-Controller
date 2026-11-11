@@ -45,6 +45,9 @@ SLM_INFO_HEIGHT_FRACTION: float = 0.02
 # (Arbitrary Arrays / Preview). Panels never shrink below their minimum width.
 CENTRAL_LEFT_WIDTH_FRACTION: float = 0.20
 CENTRAL_RIGHT_WIDTH_FRACTION: float = 1.0 - CENTRAL_LEFT_WIDTH_FRACTION
+# Height split of the right column: Arbitrary Arrays + hologram panel (top) and Preview (bottom).
+CENTRAL_TOP_HEIGHT_FRACTION: float = 0.3
+CENTRAL_BOTTOM_HEIGHT_FRACTION: float = 1.0 - CENTRAL_TOP_HEIGHT_FRACTION
 
 # Gap between panels [px]: between the left-column panels, between the docks (splitter handles), to the window edges
 # (left, right, bottom, below the top menu)
@@ -199,6 +202,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     d_slm_info: dockarea.Dock
     output_log: QtWidgets.QPlainTextEdit
     btn_clear_output_log: QtWidgets.QPushButton
+    btn_copy_output_log: QtWidgets.QPushButton
     # Advanced panel (gui/panels/advanced.py)
     grating_out: np.ndarray
     pupil: np.ndarray
@@ -937,10 +941,14 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     def createDocks(self) -> None:
         self._d1 = dockarea.Dock("All", size=(700, 700))
+        self._d1.nStyle = "Dock > QWidget { border: none; }"  # no frame around the central block; its panels have their own
         self.area.addDock(self._d1, "left")
         self._d1.hideTitleBar()
 
         self._global_layout = pg.LayoutWidget()
+        self._global_layout.layout.setContentsMargins(0, 0, 0, 0)  # panels line up with the info strip and the Output log
+        self._global_layout.layout.setSpacing(PANEL_GAP_PX)
+        self._d1.layout.setContentsMargins(0, 0, 0, 0)
 
         # Left column in its own VBox so Elementary is not stretched to the
         # Arbitrary Arrays row height in the outer grid.
@@ -980,13 +988,15 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._global_layout.addWidget(left_col, row=0, col=0, rowspan=2)
 
-        self._arbitrary = ArbitraryArraysPanel(self)
-        self._global_layout.addWidget(framed_panel(self._arbitrary), row=0, col=1)
+        self._arbitrary = ArbitraryArraysPanel(self, gap_px=PANEL_GAP_PX)  # frames its own two panels
+        self._global_layout.addWidget(self._arbitrary, row=0, col=1)
 
         self._preview = LastSentPreviewPanel(self)
         self._global_layout.addWidget(framed_panel(self._preview), row=1, col=1)
         self._global_layout.layout.setColumnStretch(0, round(100 * CENTRAL_LEFT_WIDTH_FRACTION))
         self._global_layout.layout.setColumnStretch(1, round(100 * CENTRAL_RIGHT_WIDTH_FRACTION))
+        self._global_layout.layout.setRowStretch(0, round(100 * CENTRAL_TOP_HEIGHT_FRACTION))
+        self._global_layout.layout.setRowStretch(1, round(100 * CENTRAL_BOTTOM_HEIGHT_FRACTION))
         self._last_sent_plot = self._preview.last_sent_plot
         self._last_sent_img_item = self._preview.last_sent_img_item
         self._last_sent_colorbar = self._preview.last_sent_colorbar

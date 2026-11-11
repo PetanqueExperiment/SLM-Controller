@@ -1,6 +1,6 @@
 """Arbitrary Arrays panel package (see panel.py for the layout of the modules).
 
-``ArbitraryArraysPanel`` is imported on first use, so the non-UI modules (rois, traps, hologram_files) can be used
+``ArbitraryArraysPanel`` is imported on first use, so the non-UI modules (rois, traps) can be used
 without Qt or the OpenCL GPU module.
 """
 

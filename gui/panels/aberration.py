@@ -35,10 +35,6 @@ class AberrationControlPanel(QtWidgets.QWidget):
         self.root = pg.LayoutWidget()
         self.Abberation_control_layout = self.root
 
-        self.label_Abberation_control_layout = QtWidgets.QLabel(""" -- ABERRATION CONTROL -- """)
-        self.label_Abberation_control_layout.setAlignment(QtCore.Qt.AlignCenter)
-        self.Abberation_control_layout.addWidget(self.label_Abberation_control_layout, row=0, colspan=4)
-
         # Switches the Zernike correction on / off in updatePhase (state stored in the profile: corrections.aberration).
         self.zernikeCorrectionChkBx = QtWidgets.QCheckBox("Aberration control")
         self.Abberation_control_layout.addWidget(self.zernikeCorrectionChkBx, row=1, col=0, colspan=4)

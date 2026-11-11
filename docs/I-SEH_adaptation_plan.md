@@ -27,7 +27,7 @@ Your forward hologram path **is** SEH (including axial Fresnel via `k_z`):
              slm_phase[k] = slm_phase[k] + contrib;
 ```
 
-Called from `computeHologram()` in [`gui/panels/arbitrary_arrays/algorithms.py`](../gui/panels/arbitrary_arrays/algorithms.py). Endpoints can use existing `WGS()`. Trap state is already `(pos, k, θ, w, pupil)` with the same `k ∝ (M/f) r` conversion as the paper ([`gui/constants.py`](../gui/constants.py)).
+Called from `computeHologram()` in [`gui/hologram_generator.py`](../gui/hologram_generator.py). Endpoints can use existing `WGS()`. Trap state is already `(pos, k, θ, w, pupil)` with the same `k ∝ (M/f) r` conversion as the paper ([`gui/constants.py`](../gui/constants.py)).
 
 ```mermaid
 flowchart LR

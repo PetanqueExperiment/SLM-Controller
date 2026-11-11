@@ -36,7 +36,17 @@ class OutputDock:
             _mono = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
         self.gui.output_log.setFont(_mono)
         self.gui.btn_clear_output_log.clicked.connect(self.gui.output_log.clear)
-        out_wrap.addWidget(self.gui.output_log, row=0, col=0)
-        out_wrap.addWidget(self.gui.btn_clear_output_log, row=1, col=0)
+        self.gui.btn_copy_output_log = QtWidgets.QPushButton("Copy log")
+        self.gui.btn_copy_output_log.setToolTip("Copy the whole log to the clipboard")
+        self.gui.btn_copy_output_log.clicked.connect(self._copy_log)
+        out_wrap.addWidget(self.gui.output_log, row=0, col=0, colspan=2)
+        out_wrap.addWidget(self.gui.btn_clear_output_log, row=1, col=1)
+        out_wrap.addWidget(self.gui.btn_copy_output_log, row=1, col=0)
+        out_wrap.layout.setColumnStretch(0, 1)  # Copy log | Clear log: equal widths
+        out_wrap.layout.setColumnStretch(1, 1)
         self.gui.d_output.addWidget(out_wrap)
         self.gui.area.addDock(self.gui.d_output, "bottom")
+
+    def _copy_log(self) -> None:
+        """Copy log: put the whole log text on the clipboard."""
+        QtWidgets.QApplication.clipboard().setText(self.gui.output_log.toPlainText())

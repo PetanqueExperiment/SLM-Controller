@@ -30,8 +30,10 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 - `gui/main_window.py` — `SLMGUI`: shared phase state, `updatePhase()` (the only
   path that sends frames), menus (Device / Profiles / Settings), docks.
 - `gui/panels/` — one panel per file; `arbitrary_arrays/` is a package
-  (`panel.py` UI; `rois.py`, `traps.py`, `algorithms.py`, `hologram_files.py`,
+  (`panel.py` UI; `rois.py`, `traps.py`,
   `tweezer_array.py` non-UI; `equalization.py` dormant; `legacy.py` unused old code).
+- `gui/hologram_generator.py` — hologram algorithms (computeHologram, WGS, GS) on top of `libslm/gpu.py`;
+  `gui/hologram_handler.py` — Save / Load Hologram files (.pkl `traps_dict`, old .npy / .bmp).
 - `gui/settings.py` — settings, profiles, device list (JSON I/O, no Qt).
 - `gui/defaults.py` — working-directory paths; `gui/constants.py` — shared values
   and the µm → phase factors `positionToStepPerPixel(wavelength_m)`.
@@ -50,7 +52,7 @@ written to `temperature_logs/` in the repo; not in simulate mode).
 - Ask before touching anything that changes what is sent to the hardware.
   Verify refactors of the hologram path bit-for-bit against the previous commit.
 - Physics/optics calculations (`gui/panels/arbitrary_arrays/` tweezer_array.py,
-  traps.py, algorithms.py, rois.py; `gui/zernike.py`; `gui/constants.py`; trap
+  traps.py, rois.py; `gui/hologram_generator.py`; `gui/zernike.py`; `gui/constants.py`; trap
   equalization) follow the clarity-first rules of data analysis code instead:
   explicit formulas, units in names, small reviewable diffs, explain physics
   changes first.
