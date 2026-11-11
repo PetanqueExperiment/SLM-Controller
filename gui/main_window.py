@@ -16,7 +16,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError, loadCorrectionPattern
-from gui.defaults import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
+from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
 from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, setDeviceFactoryLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
@@ -25,6 +25,8 @@ from gui.panels.advanced import AdvancedControlPanel
 from gui.panels.aberration import AberrationControlPanel
 from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
+from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES
+from gui.panels.modes.common import OperationModePanel
 from gui.panels.output import OutputDock
 from gui.panels.slm_info import SlmInfoDock
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
@@ -41,10 +43,13 @@ if TYPE_CHECKING:
 OUTPUT_HEIGHT_FRACTION: float = 0.10
 SLM_INFO_HEIGHT_FRACTION: float = 0.02
 
-# Width split of the central panels: left column (Elementary / Advanced / Aberration) and right column
-# (Arbitrary Arrays / Preview). Panels never shrink below their minimum width.
+# Width split of the central panels: left column (Elementary / Advanced / Aberration / Arbitrary Arrays) and right
+# column (Operation mode / Preview). Panels never shrink below their minimum width.
 CENTRAL_LEFT_WIDTH_FRACTION: float = 0.20
 CENTRAL_RIGHT_WIDTH_FRACTION: float = 1.0 - CENTRAL_LEFT_WIDTH_FRACTION
+# Height split of the right column: Operation mode panel (top) and Preview (bottom).
+OPERATION_MODE_HEIGHT_FRACTION: float = 0.5
+PREVIEW_HEIGHT_FRACTION: float = 1.0 - OPERATION_MODE_HEIGHT_FRACTION
 # Height split of the right column: Arbitrary Arrays + hologram panel (top) and Preview (bottom).
 CENTRAL_TOP_HEIGHT_FRACTION: float = 0.3
 CENTRAL_BOTTOM_HEIGHT_FRACTION: float = 1.0 - CENTRAL_TOP_HEIGHT_FRACTION
@@ -239,6 +244,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.SLM = None
         self.factory_lut = None
         self._suspend_phase_updates = False
+        self._dynamic_is_ready = False
 
         self.initUI()
         self.initPhase()
@@ -442,6 +448,18 @@ class SLMGUI(QtWidgets.QMainWindow):
         box.setEnabled(available)
         box.setToolTip("" if available else "No factory LUT loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set factory LUT…)")
 
+    @property
+    def dynamicIsReady(self) -> bool:
+        """True when the dynamic mode is ready; setting it updates the status next to the Operation mode selector."""
+        return self._dynamic_is_ready
+
+    @dynamicIsReady.setter
+    def dynamicIsReady(self, ready: bool) -> None:
+        self._dynamic_is_ready = bool(ready)
+        panel = getattr(self, "_operation_mode_panel", None)
+        if panel is not None:
+            panel.refreshStatus()
+
     def isSLMConnected(self) -> bool:
         """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
         return self.SLM is not None and self.SLM.connected
@@ -581,11 +599,11 @@ class SLMGUI(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         menu.addAction("View devices").triggered.connect(lambda _checked=False: self._showDevices())
         menu.addAction("Add device").triggered.connect(lambda _checked=False: self._addDeviceDialog())
-        self._set_factory_lut_action = menu.addAction("Set factory LUT…")
-        self._set_factory_lut_action.triggered.connect(lambda _checked=False: self._setFactoryLutDialog())
         menu.addSeparator()
         self._connect_action = menu.addAction("Connect…")
         self._connect_action.triggered.connect(lambda _checked=False: self._connectDialog())
+        self._set_factory_lut_action = menu.addAction("Set factory LUT…")
+        self._set_factory_lut_action.triggered.connect(lambda _checked=False: self._setFactoryLutDialog())
         self._disconnect_action = menu.addAction("Disconnect")
         self._disconnect_action.triggered.connect(lambda _checked=False: self._disconnectClicked())
         menu.aboutToShow.connect(self._updateDeviceActions)
@@ -836,11 +854,11 @@ class SLMGUI(QtWidgets.QMainWindow):
         return writeProfile(name or self.current_profile, self.profileParams())
 
     def _create_profiles_menu(self) -> QtWidgets.QMenu:
-        """Profiles drop-down: load, save and duplicate the profiles in profiles/."""
+        """Profiles drop-down: load, save and save-as the profiles in profiles/."""
         menu = QtWidgets.QMenu(self)
         menu.addAction("Load…").triggered.connect(lambda _checked=False: self._loadProfileDialog())
         menu.addAction("Save").triggered.connect(lambda _checked=False: self._saveProfileClicked())
-        menu.addAction("Duplicate…").triggered.connect(lambda _checked=False: self._duplicateProfileDialog())
+        menu.addAction("Save as…").triggered.connect(lambda _checked=False: self._saveProfileAsDialog())
         menu.addSeparator()
         menu.addAction("Restore default profile").triggered.connect(lambda _checked=False: self._restoreDefaultProfileClicked())
         return menu
@@ -917,27 +935,37 @@ class SLMGUI(QtWidgets.QMainWindow):
         hint = "" if connected or self.board is None else f" ({self._boardLabel(self.board)}: Device ▸ Connect… to connect)"
         print(f"Loaded profile {name!r}{hint}")
 
-    def _duplicateProfileDialog(self) -> None:
-        """Profiles ▸ Duplicate…: save the active profile, with its current values, under a new name in profiles/."""
+    def _saveProfileAsDialog(self) -> None:
+        """Profiles ▸ Save as…: save the current values under a new name in profiles/ and make it the active profile.
+
+        The previously active profile file is left as it was last saved.
+        """
         source = self.current_profile
-        target, ok = QtWidgets.QInputDialog.getText(self, "Duplicate profile", f"Name of the new profile (copy of the active profile {source!r}):", QtWidgets.QLineEdit.Normal, f"{source}_copy")
+        target, ok = QtWidgets.QInputDialog.getText(self, "Save profile as", f"Name of the new profile (current values of {source!r}):", QtWidgets.QLineEdit.Normal, f"{source}_copy")
         if not ok:
             return
         target = target.strip()
         if not isValidProfileName(target):
-            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"{target!r} is not a valid name.\nUse letters, digits, spaces, '-' or '_'.")
+            QtWidgets.QMessageBox.warning(self, "Save profile as", f"{target!r} is not a valid name.\nUse letters, digits, spaces, '-' or '_'.")
             return
         if target in listProfiles():
-            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Profile {target!r} already exists.")
+            QtWidgets.QMessageBox.warning(self, "Save profile as", f"Profile {target!r} already exists.")
             return
         params = self.profileParams()
         try:
             path = writeProfile(target, params)
         except OSError as e:
-            print("Could not write the profile copy:", e)
-            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Could not write {target!r}:\n{e}")
+            print("Could not write the profile:", e)
+            QtWidgets.QMessageBox.warning(self, "Save profile as", f"Could not write {target!r}:\n{e}")
             return
-        print(f"Copied profile {source!r} to {target!r}: {path}")
+        self.current_profile = target
+        self.settings.last_profile = target
+        try:
+            self.settings.save()
+        except OSError as e:
+            print("Could not save settings:", e)
+        self._updateWindowTitle()
+        print(f"Saved profile {source!r} as {target!r} (now active): {path}")
 
     def createDocks(self) -> None:
         self._d1 = dockarea.Dock("All", size=(700, 700))
@@ -974,6 +1002,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         adv_aber_frame = framed_panel(adv_aber)
         adv_aber_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
         left_lay.addWidget(adv_aber_frame)
+
+        self._arbitrary = ArbitraryArraysPanel(self, gap_px=PANEL_GAP_PX)  # frames its own two panels
+        self._arbitrary.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+        left_lay.addWidget(self._arbitrary)
         left_lay.addStretch(1)
         # Aliases for updatePhase / cross-panel reads
         self._ManufacturerCorrectionChkBx = self._advanced.ManufacturerCorrectionChkBx
@@ -988,11 +1020,19 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._global_layout.addWidget(left_col, row=0, col=0, rowspan=2)
 
-        self._arbitrary = ArbitraryArraysPanel(self, gap_px=PANEL_GAP_PX)  # frames its own two panels
-        self._global_layout.addWidget(self._arbitrary, row=0, col=1)
-
+        right_col = QtWidgets.QWidget()
+        right_lay = QtWidgets.QVBoxLayout(right_col)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(PANEL_GAP_PX)
+        self._operation_mode_panel = OperationModePanel(self, OPERATION_MODES, DEFAULT_OPERATION_MODE)
+        mode_frame = framed_panel(self._operation_mode_panel)
+        mode_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Ignored)
+        right_lay.addWidget(mode_frame, round(100 * OPERATION_MODE_HEIGHT_FRACTION))
         self._preview = LastSentPreviewPanel(self)
-        self._global_layout.addWidget(framed_panel(self._preview), row=1, col=1)
+        preview_frame = framed_panel(self._preview)
+        preview_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Ignored)
+        right_lay.addWidget(preview_frame, round(100 * PREVIEW_HEIGHT_FRACTION))
+        self._global_layout.addWidget(right_col, row=0, col=1, rowspan=2)
         self._global_layout.layout.setColumnStretch(0, round(100 * CENTRAL_LEFT_WIDTH_FRACTION))
         self._global_layout.layout.setColumnStretch(1, round(100 * CENTRAL_RIGHT_WIDTH_FRACTION))
         self._global_layout.layout.setRowStretch(0, round(100 * CENTRAL_TOP_HEIGHT_FRACTION))
@@ -1088,6 +1128,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             self.SLM.uploadHologram(self.totalPhase)
         self._publish_static_changes()
         self._preview._update_last_sent_preview()
+        self._arbitrary.refreshHologramLabel()
 
     def __del__(self) -> None:
         plt.close("all")

@@ -1,10 +1,11 @@
-"""The "Plot traps file" window: trap centres of one or more ``rois.json`` files overlaid in camera pixels."""
+"""The trap plot window: trap centres of ``rois.json`` files and of the loaded traps overlaid in camera pixels."""
 
 from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pyqtgraph as pg
 
 from gui.panels.arbitrary_arrays.rois import readCentersPx
@@ -23,7 +24,12 @@ def plotTrapsFile(gui: SLMGUI, path: str) -> None:
     if centers.size == 0:
         print('No valid "centers" in', path)
         return
+    plotTrapCenters(gui, centers, os.path.basename(path))
+    print('Plotted %d traps from %s' % (centers.shape[0], path))
 
+
+def plotTrapCenters(gui: SLMGUI, centers: np.ndarray, label: str) -> None:
+    """Add (N, 2) camera-pixel trap centres to the trap plot window (created if not open) under ``label``."""
     win = getattr(gui, '_trap_plot_window', None)
     if win is None or not win.isVisible():
         win = pg.PlotWidget()
@@ -39,7 +45,7 @@ def plotTrapsFile(gui: SLMGUI, path: str) -> None:
 
     color = pg.intColor(gui._trap_plot_count, hues=8)
     gui._trap_plot_count += 1
-    name = '%s (%d)' % (os.path.basename(path), centers.shape[0])
+    name = '%s (%d)' % (label, centers.shape[0])
     win.plot(centers[:, 0], centers[:, 1], pen=None, symbol='o', symbolSize=8, symbolBrush=color, symbolPen=None, name=name)
     if centers.shape[0] <= 200:
         for i, (x, y) in enumerate(centers):
@@ -50,4 +56,3 @@ def plotTrapsFile(gui: SLMGUI, path: str) -> None:
     win.show()
     win.raise_()
     win.activateWindow()
-    print('Plotted %d traps from %s' % (centers.shape[0], path))

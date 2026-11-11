@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from gui import temperature_log
-from gui.defaults import LOGS_DIR
+from gui.paths import LOGS_DIR
 from gui.temperature_log import DailyTemperatureLog
 
 

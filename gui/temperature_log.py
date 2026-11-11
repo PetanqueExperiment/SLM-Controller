@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Sequence
 
-from gui.defaults import LOGS_DIR
+from gui.paths import LOGS_DIR
 
 PROJECT_LOG_DIR: Path = Path(__file__).resolve().parent.parent / "temperature_logs"
 LOG_DIRS: tuple[Path, ...] = (PROJECT_LOG_DIR, LOGS_DIR)

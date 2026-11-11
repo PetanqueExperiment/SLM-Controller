@@ -49,6 +49,14 @@ def readTrapCoordsM(path: str, verbose: bool = False) -> np.ndarray | None:
             print('rois.json has no valid "centers" array.')
         return None
 
+    coords_m = centersToCoordsM(centers)
+    if coords_m is None and verbose:
+        print('rois.json "centers" produced no valid points.')
+    return coords_m
+
+
+def centersToCoordsM(centers: list) -> np.ndarray | None:
+    """Camera-pixel centres [[x, y], ...] → trap positions (N, 3) in metres (x, y, z = 0); None if none are valid."""
     um_per_px = _um_per_px()
     cx = 0.5 * float(param.ImgResX)
     cy = 0.5 * float(param.ImgResY)
@@ -62,11 +70,21 @@ def readTrapCoordsM(path: str, verbose: bool = False) -> np.ndarray | None:
         y_um = (px_y - cy) * um_per_px
         rows.append((x_um * 1e-6, y_um * 1e-6, 0.0))
     if not rows:
-        if verbose:
-            print('rois.json "centers" produced no valid points.')
         return None
 
     return np.asarray(rows, dtype=np.float64)
+
+
+def trapsPosToCentersPx(traps_pos: np.ndarray) -> np.ndarray:
+    """Trap positions ``traps_pos`` (N, 4): index, y, x, z [m] → (N, 2) camera-pixel centres [x, y]; inverse of centersToCoordsM."""
+    um_per_px = _um_per_px()
+    cx = 0.5 * float(param.ImgResX)
+    cy = 0.5 * float(param.ImgResY)
+    x_um = traps_pos[:, 2] * 1e6
+    y_um = traps_pos[:, 1] * 1e6
+    x_px = x_um / um_per_px + cx
+    y_px = y_um / um_per_px + cy
+    return np.column_stack([x_px, y_px])
 
 
 def readCentersPx(path: str) -> np.ndarray:

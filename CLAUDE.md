@@ -35,7 +35,7 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 - `gui/hologram_generator.py` — hologram algorithms (computeHologram, WGS, GS) on top of `libslm/gpu.py`;
   `gui/hologram_handler.py` — Save / Load Hologram files (.pkl `traps_dict`, old .npy / .bmp).
 - `gui/settings.py` — settings, profiles, device list (JSON I/O, no Qt).
-- `gui/defaults.py` — working-directory paths; `gui/constants.py` — shared values
+- `gui/paths.py` — working-directory paths; `gui/constants.py` — shared values
   and the µm → phase factors `positionToStepPerPixel(wavelength_m)`.
 - `profile_templates/default.json` — tracked default values of every profile
   parameter; working profiles only override it. Values do not belong in code.

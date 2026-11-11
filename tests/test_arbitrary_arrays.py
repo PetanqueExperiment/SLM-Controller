@@ -50,6 +50,21 @@ def test_lattice_round_trip_through_rois_json(tmp_path):
     np.testing.assert_array_equal(rois.readCentersPx(str(path)), np.asarray(centers))
 
 
+def test_centers_to_coords_matches_saved_file(tmp_path):
+    arr = rectangular_lattice_coords(3, 4, 13.7, 9.1, sep_z_um=5.0, rotation_deg_z=17.0, center_gap_um=4.0)
+    centers, side = rois.latticeCenters(arr, 13.7, 9.1)
+    path = tmp_path / "rois.json"
+    rois.writeRoisJson(str(path), centers, side, 17.0)
+    np.testing.assert_array_equal(rois.centersToCoordsM(centers), rois.readTrapCoordsM(str(path)))
+    assert rois.centersToCoordsM([[1], "x"]) is None
+
+
+def test_traps_pos_to_centers_px_inverts_centers_to_coords():
+    centers = [[100.25, 200.5], [640.0, 512.0], [900.125, 30.75]]
+    traps_pos = coords_npy_to_traps_pos(rois.centersToCoordsM(centers))
+    np.testing.assert_allclose(rois.trapsPosToCentersPx(traps_pos), np.asarray(centers), atol=1e-9)
+
+
 @pytest.mark.parametrize("content", ['{"centers": []}', '{"centers": [[1], "x"]}', "{}"])
 def test_read_trap_coords_without_valid_centers(tmp_path, content):
     path = tmp_path / "rois.json"

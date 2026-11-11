@@ -10,8 +10,8 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from gui.defaults import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
-from gui.defaults import STARTUP_LAST_USED, STARTUP_MODES
+from gui.paths import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
+from gui.paths import STARTUP_LAST_USED, STARTUP_MODES
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:

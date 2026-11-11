@@ -31,10 +31,7 @@ if __name__ == "__main__":
     _app_icon = application_icon()
     app.setWindowIcon(_app_icon)
 
-    slmGui = SLMGUI(
-        start_hero=not _args.no_hero,
-        hero_name=_args.hero_name,
-    )
+    slmGui = SLMGUI(start_hero=not _args.no_hero, hero_name=_args.hero_name)
     slmGui.setWindowIcon(_app_icon)
     slmGui.showMaximized()
     try:
