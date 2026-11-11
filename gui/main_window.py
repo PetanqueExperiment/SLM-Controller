@@ -34,7 +34,7 @@ import libslm.parameters as param
 
 if TYPE_CHECKING:
     from gui.hero import SLMHero
-    from temperature_log import DailyTemperatureLog
+    from gui.temperature_log import DailyTemperatureLog
 
 
 # Fraction of the window height given to the bottom Output (log) dock;

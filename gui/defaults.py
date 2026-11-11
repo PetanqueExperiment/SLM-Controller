@@ -7,6 +7,7 @@ PETANQUE_DIR: Path = HOME / 'petanque_dev'
 SLM_DIR: Path = PETANQUE_DIR / 'SLM'
 
 DEVICES_DIR: Path = SLM_DIR / 'devices'
+LOGS_DIR: Path = SLM_DIR / 'logs'
 HOLO_DIR: Path = SLM_DIR / 'holograms'
 PROFILE_DIR: Path = SLM_DIR / 'profiles'
 SETTINGS_DIR: Path = SLM_DIR / 'settings'

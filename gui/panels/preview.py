@@ -8,7 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-from temperature_log import DailyTemperatureLog
+from gui.temperature_log import DailyTemperatureLog
 
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI
@@ -161,7 +161,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.last_sent_preview_layout.addWidget(self.label_slm_temperature, row=3, col=0, colspan=2)
 
     def _start_slm_temperature_monitor(self) -> None:
-        """Poll Read_SLM_temperature once per second and log each sample."""
+        """Poll Read_SLM_temperature once per second and log each sample (not in simulate mode)."""
         self.gui._temperature_log = DailyTemperatureLog()
         self.gui._temp_log_error_reported = False
         self.gui._slm_temp_timer = QtCore.QTimer(self)
@@ -179,6 +179,9 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             temp_c = slm.readTemperature()
         except Exception:
             self.label_slm_temperature.setText("SLM temperature: unavailable")
+            return
+        if slm.simulate:
+            self.label_slm_temperature.setText(f"SLM temperature: {temp_c:.1f} °C (simulated, not logged)")
             return
         self.label_slm_temperature.setText(f"SLM temperature: {temp_c:.1f} °C")
         try:
