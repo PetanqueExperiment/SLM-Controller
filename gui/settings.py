@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from gui.defaults import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
+from gui.defaults import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
 from gui.defaults import STARTUP_LAST_USED, STARTUP_MODES
 
 
@@ -188,13 +188,18 @@ class Device:
 
     board: int
     serial: int | None = None
+    factory_lut: str = ""  # name (no extension) of the factory correction .bmp in devices/; "" = none set
 
     @property
     def simulated(self) -> bool:
         return self.board == SIMULATED_BOARD
 
     def toDict(self) -> dict[str, Any]:
-        return {"board": self.board} if self.serial is None else {"board": self.board, "serial": self.serial}
+        d: dict[str, Any] = {"board": self.board}
+        if self.serial is not None:
+            d["serial"] = self.serial
+        d["factory_lut"] = self.factory_lut
+        return d
 
 
 def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
@@ -220,7 +225,11 @@ def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
         serial = parseSerial(entry.get("serial"))
         if "serial" in entry and entry["serial"] is not None and serial is None:
             print(f"Ignoring invalid serial {entry['serial']!r} for board {board} in {path}")
-        devices[board] = Device(board, serial)
+        factory_lut = entry.get("factory_lut", "")
+        if not isinstance(factory_lut, str):
+            print(f"Ignoring invalid factory_lut {factory_lut!r} for board {board} in {path}")
+            factory_lut = ""
+        devices[board] = Device(board, serial, factory_lut.strip())
     return [devices[b] for b in sorted(devices)]
 
 
@@ -241,6 +250,22 @@ def addDevice(board: int, path: Path = DEVICES_FILE) -> bool:
         return False
     saveDevices(devices + [Device(board)], path)
     return True
+
+
+def factoryLutPath(name: str, devices_dir: Path | None = None) -> Path:
+    """Path of the factory correction file ``name`` (stored without extension in devices.json)."""
+    return (DEVICES_DIR if devices_dir is None else devices_dir) / f"{name}.bmp"
+
+
+def setDeviceFactoryLut(board: int, name: str, path: Path = DEVICES_FILE) -> bool:
+    """Record the factory correction file name for the listed device on ``board``; False if the board is not listed."""
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board and not device.simulated:
+            device.factory_lut = name
+            saveDevices(devices, path)
+            return True
+    return False
 
 
 def deviceLabel(device: Device) -> str:

@@ -197,3 +197,22 @@ def test_upload_uses_own_board(hw):
     slm.uploadHologram(np.zeros((slm_module.H, slm_module.W), dtype=np.uint8))
     assert fake.calls[-2:] == ["Write_image(2)", "ImageWriteComplete(2)"]
     assert slm.readTemperature() == 33.5
+
+
+def test_no_wfc_path_means_no_correction():
+    slm = MeadowlarkSLM(simulate=True, wfc_path=None)
+    slm.connect()
+    try:
+        assert slm.correction_pattern is None
+    finally:
+        slm.disconnect()
+
+
+def test_load_correction_pattern_matches_driver():
+    a = slm_module.loadCorrectionPattern(slm_module.WFC_FILE)
+    slm = MeadowlarkSLM(simulate=True)
+    slm.connect()
+    try:
+        assert np.array_equal(a, slm.correction_pattern) and a.dtype == np.float32
+    finally:
+        slm.disconnect()

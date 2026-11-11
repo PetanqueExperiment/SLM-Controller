@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import filecmp
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -13,9 +15,9 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
-from libslm.slm import MeadowlarkSLM, SerialMismatchError
-from gui.defaults import DEFAULT_PROFILE, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
-from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, readProfile, restoreDefaultProfile, setDeviceSerial, writeProfile
+from libslm.slm import MeadowlarkSLM, SerialMismatchError, loadCorrectionPattern
+from gui.defaults import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
+from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, setDeviceFactoryLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -39,8 +41,12 @@ if TYPE_CHECKING:
 OUTPUT_HEIGHT_FRACTION: float = 0.10
 SLM_INFO_HEIGHT_FRACTION: float = 0.02
 
-# Gap between panels [px]: between the left-column panels, between the docks (splitter handles) and above the SLM strip.
+# Gap between panels [px]: between the left-column panels, between the docks (splitter handles), to the window edges
+# (left, right, bottom, below the top menu)
+# and between the profile / SLM panels of the info strip.
 PANEL_GAP_PX: int = 4
+
+WINDOW_TITLE: str = "SLM Controller"
 
 
 class SLMMode:
@@ -65,6 +71,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     # --- Construction / device ---
     parent: Any  # optional owner passed to __init__ (only set if given)
     SLM: Optional[MeadowlarkSLM]  # None when no SLM is connected
+    factory_lut: Optional[np.ndarray]  # factory correction of the connected SLM [rad] (devices.json factory_lut); None = none
     board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
     param_P: float  # gray levels per 2π (profile: grating.phase_levels)
@@ -153,6 +160,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     _startup_mode_group: QtWidgets.QActionGroup
     _connect_action: QtWidgets.QAction  # Device ▸ Connect… (enabled only while no SLM is connected)
     _disconnect_action: QtWidgets.QAction  # Device ▸ Disconnect (enabled only while an SLM is connected)
+    _set_factory_lut_action: QtWidgets.QAction  # Device ▸ Set factory LUT… (enabled only for a real, selected SLM)
 
     # --- Settings / profiles ---
     settings: AppSettings  # settings/settings.json
@@ -220,6 +228,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.current_profile = self.settings.startupProfile()
         self.board = None
         self.SLM = None
+        self.factory_lut = None
         self._suspend_phase_updates = False
 
         self.initUI()
@@ -334,7 +343,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         device = findDevice(board)
         expected = None if device is None else device.serial
         try:
-            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, wfc_path=None, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
             slm.connect()
         except SerialMismatchError as e:
             print(f"Connection aborted: {e} Nothing was sent to the SLM.")
@@ -348,9 +357,33 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._updateWindowTitle()
         print(f"Connected to {name}")
         self._checkSerial(device, slm.serial)
+        self._loadFactoryLut(device)
         self.updatePhase()
         return True
 
+    def _loadFactoryLut(self, device: Optional[Device]) -> None:
+        """Load the connected SLM's factory correction (devices.json factory_lut → devices/<name>.bmp) into self.factory_lut.
+
+        The Simulated SLM gets none. A real SLM without a usable file gets none either, with a warning.
+        """
+        self.factory_lut = None
+        if self.board == SIMULATED_BOARD:
+            print("Simulated SLM: no factory LUT")
+            return
+        name = "" if device is None else device.factory_lut
+        label = self._boardLabel(self.board)
+        if not name:
+            reason = "no factory LUT is set"
+        else:
+            path = factoryLutPath(name)
+            try:
+                self.factory_lut = loadCorrectionPattern(path)
+                print(f"{label}: factory LUT {name!r} loaded from {path}")
+                return
+            except (OSError, ValueError) as e:
+                reason = f"factory LUT {name!r} could not be loaded ({e})"
+        print(f"{label}: {reason}; frames are sent without manufacturer correction")
+        QtWidgets.QMessageBox.warning(self, "No factory LUT", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set factory LUT…")
     def _confirmSerialOverwrite(self, board: int, expected: int, actual: int) -> bool:
         """Serial number mismatch while connecting (before anything is sent to the SLM). Yes: overwrite it in devices.json and connect; No: abort."""
         text = f"The SLM on board {board} is not the one in the device list:\n\n    expected serial number {expected}\n    found serial number {actual}\n\nYes: overwrite the serial number in the device list with {actual} and connect.\nNo: abort the connection (nothing is sent to the SLM)."
@@ -382,13 +415,8 @@ class SLMGUI(QtWidgets.QMainWindow):
             print(f"Serial number {actual} matches the device list")
 
     def _updateWindowTitle(self) -> None:
-        if self.SLM is None:
-            state = "no SLM connected"
-        elif self.SLM.simulate:
-            state = "Simulated SLM — no hardware"
-        else:
-            state = f"board {self.board}"
-        self.setWindowTitle(f"SLM Controller Petanque — profile: {self.current_profile} [{state}]")
+        """The title is fixed; the profile and SLM state are shown in the info strip at the top, refreshed here."""
+        self.setWindowTitle(WINDOW_TITLE)
         slm_info = getattr(self, "_slm_info", None)
         if slm_info is not None:
             slm_info.update()
@@ -484,7 +512,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.area = dockarea.DockArea()
         self.setCentralWidget(self.area)
         self.resize(1200, 720)
-        self.setWindowTitle("SLM Controller Petanque")
+        self.setWindowTitle(WINDOW_TITLE)
         self._create_top_menu()
         self.createDocks()
         self._install_gui_stdio()
@@ -532,6 +560,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         menu.addAction("View devices").triggered.connect(lambda _checked=False: self._showDevices())
         menu.addAction("Add device").triggered.connect(lambda _checked=False: self._addDeviceDialog())
+        self._set_factory_lut_action = menu.addAction("Set factory LUT…")
+        self._set_factory_lut_action.triggered.connect(lambda _checked=False: self._setFactoryLutDialog())
         menu.addSeparator()
         self._connect_action = menu.addAction("Connect…")
         self._connect_action.triggered.connect(lambda _checked=False: self._connectDialog())
@@ -543,6 +573,46 @@ class SLMGUI(QtWidgets.QMainWindow):
     def _updateDeviceActions(self) -> None:
         self._connect_action.setEnabled(self.SLM is None)
         self._disconnect_action.setEnabled(self.SLM is not None)
+        self._set_factory_lut_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
+
+    def _setFactoryLutDialog(self) -> None:
+        """Device ▸ Set factory LUT…: pick a .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
+        board = self.board
+        if board is None or board == SIMULATED_BOARD:
+            return
+        label = self._boardLabel(board)
+        if findDevice(board) is None:
+            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"Factory LUT for {label}", str(DEVICES_DIR), "Bitmap (*.bmp)")
+        if not path:
+            return
+        source = Path(path)
+        try:
+            pattern = loadCorrectionPattern(source)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"{source.name} cannot be used:\n{e}")
+            return
+        name = source.stem
+        target = factoryLutPath(name)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not (target.exists() and target.resolve() == source.resolve()):
+                if target.exists() and not filecmp.cmp(source, target, shallow=False):
+                    text = f"A different file named {target.name} is already in\n{target.parent}\n(it may be used by another SLM).\n\nOverwrite it?"
+                    if QtWidgets.QMessageBox.question(self, "Set factory LUT", text) != QtWidgets.QMessageBox.Yes:
+                        return
+                shutil.copyfile(source, target)
+            setDeviceFactoryLut(board, name)
+        except OSError as e:
+            print("Could not set the factory LUT:", e)
+            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"Could not set the factory LUT:\n{e}")
+            return
+        print(f"{label}: factory LUT set to {name!r} ({target})")
+        if self.isSLMConnected() and self.board == board:
+            self.factory_lut = pattern
+            self.updatePhase()
+            print(f"{label}: new factory LUT applied")
 
     def _disconnectClicked(self) -> None:
         """Device ▸ Disconnect: close the SLM session after confirmation; the GUI keeps running without an SLM."""
@@ -556,6 +626,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     def disconnectSLM(self) -> None:
         """Close the SLM session. ``self.board`` is kept, so the profile and Device ▸ Connect… still refer to it."""
         slm, self.SLM = self.SLM, None
+        self.factory_lut = None
         if slm is not None:
             try:
                 slm.disconnect()
@@ -572,7 +643,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     def _deviceLabel(device: Device) -> str:
         if device.simulated:
             return deviceLabel(device)
-        return f"{deviceLabel(device)}  (SN {'not known yet' if device.serial is None else device.serial})"
+        return f"{deviceLabel(device)}  (SN {'not known yet' if device.serial is None else device.serial}, factory LUT: {device.factory_lut or 'none'})"
 
     def _showDevices(self) -> None:
         devices = loadDevices()
@@ -825,11 +896,9 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"Loaded profile {name!r}{hint}")
 
     def _duplicateProfileDialog(self) -> None:
-        """Profiles ▸ Duplicate…: copy an existing profile to a new name (the active one is copied with its current values)."""
-        source = self._chooseProfile("Duplicate profile", "Profile to copy:")
-        if source is None:
-            return
-        target, ok = QtWidgets.QInputDialog.getText(self, "Duplicate profile", f"Name of the copy of {source!r}:", QtWidgets.QLineEdit.Normal, f"{source}_copy")
+        """Profiles ▸ Duplicate…: save the active profile, with its current values, under a new name in profiles/."""
+        source = self.current_profile
+        target, ok = QtWidgets.QInputDialog.getText(self, "Duplicate profile", f"Name of the new profile (copy of the active profile {source!r}):", QtWidgets.QLineEdit.Normal, f"{source}_copy")
         if not ok:
             return
         target = target.strip()
@@ -839,10 +908,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         if target in listProfiles():
             QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Profile {target!r} already exists.")
             return
-        params = self.profileParams() if source == self.current_profile else readProfile(source)
-        if params is None:
-            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Profile {source!r} has no saved file.")
-            return
+        params = self.profileParams()
         try:
             path = writeProfile(target, params)
         except OSError as e:
@@ -906,11 +972,11 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._d1.addWidget(self._global_layout, row=0, col=0)
 
         self._output = OutputDock(self)
-        self._slm_info = SlmInfoDock(self)
+        self._slm_info = SlmInfoDock(self, PANEL_GAP_PX)
         dock_splitter = self.d_output.container()
         if isinstance(dock_splitter, QtWidgets.QSplitter):
             dock_splitter.setHandleWidth(PANEL_GAP_PX)
-        self.area.layout.setContentsMargins(0, PANEL_GAP_PX, 0, 0)  # gap between the top menu and the SLM strip
+        self.area.layout.setContentsMargins(PANEL_GAP_PX, PANEL_GAP_PX, PANEL_GAP_PX, PANEL_GAP_PX)  # gaps to the window edges and below the top menu
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -975,8 +1041,8 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
 
-        if self._ManufacturerCorrectionChkBx.isChecked() and self.SLM is not None:
-            self.totalPhase = self.totalPhase + self.SLM.correction_pattern
+        if self._ManufacturerCorrectionChkBx.isChecked() and self.factory_lut is not None:
+            self.totalPhase = self.totalPhase + self.factory_lut
         if self._zernikeCorrectionChkBx.isChecked():
             self.totalPhase = self.totalPhase + self.im_zernike
         if self._pupilChkBx.isChecked():

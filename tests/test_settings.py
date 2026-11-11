@@ -27,7 +27,7 @@ def test_add_device_creates_file_and_rejects_duplicates(tmp_path):
     assert addDevice(1, path) is True
     assert addDevice(2, path) is False
     assert loadDevices(path) == [SIM, Device(1), Device(2)]
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1}, {"board": 2}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "factory_lut": ""}, {"board": 2, "factory_lut": ""}]}
 
 
 def test_set_device_serial_and_find(tmp_path):
@@ -37,7 +37,7 @@ def test_set_device_serial_and_find(tmp_path):
     assert setDeviceSerial(5, 1234, path) is False
     assert findDevice(1, path) == Device(1, 6801)
     assert findDevice(5, path) is None
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "serial": 6801}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "serial": 6801, "factory_lut": ""}]}
 
 
 def test_save_devices_sorts_and_deduplicates(tmp_path):
@@ -70,7 +70,7 @@ def test_simulated_slm_is_permanent_and_never_written(tmp_path):
     path = tmp_path / "devices.json"
     assert addDevice(settings.SIMULATED_BOARD, path) is False
     saveDevices([SIM, Device(2)], path)
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 2}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 2, "factory_lut": ""}]}
     assert findDevice(settings.SIMULATED_BOARD, path) == SIM
 
 
@@ -163,3 +163,15 @@ def test_restore_default_profile_copies_template(tmp_path, monkeypatch):
     path = settings.restoreDefaultProfile()
     assert path == tmp_path / "profiles" / "default.json"
     assert json.loads(path.read_text(encoding="utf-8")) == settings.loadProfileTemplate()
+
+
+def test_factory_lut_field(tmp_path):
+    path = tmp_path / "devices.json"
+    path.write_text(json.dumps({"devices": [{"board": 1}, {"board": 2, "factory_lut": " slm6801 "}, {"board": 3, "factory_lut": 5}]}), encoding="utf-8")
+    assert [d.factory_lut for d in loadDevices(path)] == ["", "", "slm6801", ""]
+    assert settings.setDeviceFactoryLut(1, "head_A", path) is True
+    assert settings.setDeviceFactoryLut(settings.SIMULATED_BOARD, "x", path) is False
+    assert settings.setDeviceFactoryLut(9, "x", path) is False
+    assert findDevice(1, path).factory_lut == "head_A"
+    assert json.loads(path.read_text(encoding="utf-8"))["devices"][0] == {"board": 1, "factory_lut": "head_A"}
+    assert settings.factoryLutPath("head_A", tmp_path) == tmp_path / "head_A.bmp"

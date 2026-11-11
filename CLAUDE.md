@@ -41,7 +41,7 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 
 ## Working directory (`~/petanque_dev/SLM/`, outside the repo)
 `settings/settings.json` (startup mode, last profile), `profiles/<name>.json`,
-`devices/devices.json` (board + serial per real SLM; the Simulated SLM is built in), `logs/` (temperature CSVs, also
+`devices/devices.json` (board, serial and `factory_lut` per real SLM; the Simulated SLM is built in and uses no correction), `devices/<factory_lut>.bmp` (per-SLM manufacturer correction, loaded as `SLMGUI.factory_lut`), `logs/` (temperature CSVs, also
 written to `temperature_logs/` in the repo; not in simulate mode).
 
 ## How to work here

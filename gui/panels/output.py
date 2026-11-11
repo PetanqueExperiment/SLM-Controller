@@ -22,6 +22,7 @@ class OutputDock:
     def _build(self) -> None:
         """Dock showing print() / stdout / stderr (see _install_gui_stdio)."""
         self.gui.d_output = dockarea.Dock("Output", size=(800, 160))
+        self.gui.d_output.hideTitleBar()
         out_wrap = pg.LayoutWidget()
         self.gui.btn_clear_output_log = QtWidgets.QPushButton("Clear log")
         self.gui.output_log = QtWidgets.QPlainTextEdit()
@@ -35,7 +36,7 @@ class OutputDock:
             _mono = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
         self.gui.output_log.setFont(_mono)
         self.gui.btn_clear_output_log.clicked.connect(self.gui.output_log.clear)
-        out_wrap.addWidget(self.gui.btn_clear_output_log, row=0, col=0)
-        out_wrap.addWidget(self.gui.output_log, row=1, col=0)
+        out_wrap.addWidget(self.gui.output_log, row=0, col=0)
+        out_wrap.addWidget(self.gui.btn_clear_output_log, row=1, col=0)
         self.gui.d_output.addWidget(out_wrap)
         self.gui.area.addDock(self.gui.d_output, "bottom")
