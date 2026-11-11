@@ -364,7 +364,6 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         else:
             lo, hi = self._ft_levels
 
-        self.ft_img_item.setAutoLevels(False)
         self.ft_img_item.setImage(intensity, autoLevels=False, levels=[lo, hi])
         try:
             self.ft_colorbar.setLevels((lo, hi), update_items=True)
@@ -377,7 +376,6 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
     def _update_last_sent_preview(self):
         """Show the buffer last passed to the SLM and its Fourier intensity."""
         arr = np.asarray(self.gui.totalPhase)
-        self.last_sent_img_item.setAutoLevels(False)
         self.last_sent_img_item.setImage(arr, autoLevels=False, levels=[0, 255])
         self.last_sent_colorbar.setLevels((0, 255), update_items=True)
         self._fit_last_sent_view_to_image()

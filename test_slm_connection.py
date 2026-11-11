@@ -13,8 +13,8 @@ from ctypes import c_double, c_int
 
 import numpy as np
 
-import Meadowlark_SLM.communication as comm
-import Meadowlark_SLM.parameters as param
+import libslm.communication as comm
+import libslm.parameters as param
 
 
 def _query(dll, name, restype):

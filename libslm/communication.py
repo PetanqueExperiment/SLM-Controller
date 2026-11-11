@@ -224,13 +224,13 @@ def read_temperature(board: int = BOARD) -> float:
     """Return the SLM temperature in degrees Celsius. Requires :func:`connect` first."""
     if not _sdk_connected:
         raise RuntimeError(
-            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before reading temperature."
+            "Meadowlark SDK not connected. Call libslm.communication.connect() before reading temperature."
         )
     if _simulate:
         return float(SIMULATED_TEMPERATURE_C)
     if _blink_dll is None:
         raise RuntimeError(
-            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before reading temperature."
+            "Meadowlark SDK not connected. Call libslm.communication.connect() before reading temperature."
         )
     return float(_blink_dll.Read_SLM_temperature(board))
 
@@ -246,7 +246,7 @@ def upload_image_to_slm(
     global _blink_dll, _sdk_connected, _last_image
     if not _sdk_connected:
         raise RuntimeError(
-            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before upload."
+            "Meadowlark SDK not connected. Call libslm.communication.connect() before upload."
         )
 
     if image_u8.shape != (H, W):
@@ -260,7 +260,7 @@ def upload_image_to_slm(
 
     if _blink_dll is None:
         raise RuntimeError(
-            "Meadowlark SDK not connected. Call Meadowlark_SLM.communication.connect() before upload."
+            "Meadowlark SDK not connected. Call libslm.communication.connect() before upload."
         )
 
     dll = _blink_dll

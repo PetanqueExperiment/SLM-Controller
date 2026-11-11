@@ -4,7 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-import Meadowlark_SLM.parameters as param
+import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import PUPIL_VERTICAL_OFFSET, position_to_step_per_pixel
 from gpu_module_v7_3 import trap_phase_to_slm

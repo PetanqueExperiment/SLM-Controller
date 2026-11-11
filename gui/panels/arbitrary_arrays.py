@@ -13,7 +13,7 @@ from PyQt5.QtCore import pyqtSignal
 from pyqtgraph.Qt import QtCore, QtWidgets
 from PIL import Image
 
-import Meadowlark_SLM.parameters as param
+import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gpu_module_v7_3 import slm_to_trap_amp, trap_phase_to_slm
 from gui.constants import (

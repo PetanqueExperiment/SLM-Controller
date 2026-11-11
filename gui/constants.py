@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-import Meadowlark_SLM.parameters as param
+import libslm.parameters as param
 
 _SLM_SOFTWARE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

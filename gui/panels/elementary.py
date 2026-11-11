@@ -4,7 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-import Meadowlark_SLM.parameters as param
+import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 
 

@@ -27,7 +27,7 @@ try:
 except ImportError:
     from zernike import __zernikepolar__, __zernikepolynomials__
 
-import Meadowlark_SLM.parameters as param
+import libslm.parameters as param
 
 if TYPE_CHECKING:
     from gui.hero import SLMHero
@@ -410,6 +410,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.setCentralWidget(self.area)
         self.resize(1200, 720)
         self.setWindowTitle("SLM Controller Petanque")
+        self._create_top_menu()
         self.createDocks()
         self._install_gui_stdio()
         # The Output/main height split is applied in resizeEvent (see there).
@@ -424,6 +425,29 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._arbitrary.methodCB.clear()
         for key in self.methodList:
             self._arbitrary.methodCB.addItem(key)
+
+    TOP_MENU_HEIGHT = 32
+
+    def _create_top_menu(self):
+        """Fixed horizontal button bar at the top of the window (placeholder actions)."""
+        bar = QtWidgets.QToolBar("Top menu", self)
+        bar.setObjectName("topMenuBar")
+        bar.setMovable(False)
+        bar.setFloatable(False)
+        bar.setFixedHeight(self.TOP_MENU_HEIGHT)
+        bar.toggleViewAction().setVisible(False)  # no hide option in the context menu
+        bar.setContextMenuPolicy(QtCore.Qt.PreventContextMenu)
+
+        self.top_menu_buttons = {}
+        for label in ("Device", "Settings"):
+            btn = QtWidgets.QPushButton(label)
+            btn.setFixedSize(90, self.TOP_MENU_HEIGHT - 6)
+            btn.clicked.connect(lambda _checked=False, name=label: print(f"[menu] {name} clicked (not implemented)"))
+            bar.addWidget(btn)
+            self.top_menu_buttons[label] = btn
+
+        self.addToolBar(QtCore.Qt.TopToolBarArea, bar)
+        self.top_menu_bar = bar
 
     def createDocks(self):
         self._d1 = dockarea.Dock("All", size=(700, 700))
