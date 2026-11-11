@@ -24,7 +24,6 @@ from gui.panels.aberration import AberrationControlPanel
 from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
 from gui.panels.output import OutputDock
-
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
 import libslm.parameters as param
@@ -191,7 +190,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     angularM: int
     ImgCenterX: int
     ImgCenterY: int
-    # Arbitrary Arrays panel (gui/panels/arbitrary_arrays.py)
+    # Arbitrary Arrays panel (gui/panels/arbitrary_arrays/)
     map: Any
     _trap_plot_window: pg.PlotWidget
     _trap_plot_count: int

@@ -27,7 +27,7 @@ Your forward hologram path **is** SEH (including axial Fresnel via `k_z`):
              slm_phase[k] = slm_phase[k] + contrib;
 ```
 
-Called from `computeHologram()` in [`gui/panels/arbitrary_arrays.py`](../gui/panels/arbitrary_arrays.py). Endpoints can use existing `WGS()`. Trap state is already `(pos, k, θ, w, pupil)` with the same `k ∝ (M/f) r` conversion as the paper ([`gui/constants.py`](../gui/constants.py)).
+Called from `computeHologram()` in [`gui/panels/arbitrary_arrays/algorithms.py`](../gui/panels/arbitrary_arrays/algorithms.py). Endpoints can use existing `WGS()`. Trap state is already `(pos, k, θ, w, pupil)` with the same `k ∝ (M/f) r` conversion as the paper ([`gui/constants.py`](../gui/constants.py)).
 
 ```mermaid
 flowchart LR
@@ -64,7 +64,7 @@ Practical defaults from the paper, adapted down: step δ ≈ 0.5 μm (≲ w₀),
 
 ### 0. Prerequisite fix
 
-In [`gui/panels/arbitrary_arrays.py`](../gui/panels/arbitrary_arrays.py): fix `_traps_ready` / `_ensure_traps_loaded` so WGS does not reload ROIs or re-randomize θ/w every iteration. Without this, endpoints are wrong and I-SEH continuity is meaningless.
+In [`gui/panels/arbitrary_arrays/panel.py`](../gui/panels/arbitrary_arrays/panel.py): fix `_traps_ready` / `_ensure_traps_loaded` so WGS does not reload ROIs or re-randomize θ/w every iteration. Without this, endpoints are wrong and I-SEH continuity is meaningless.
 
 ### 1. Core I-SEH module (new)
 
@@ -124,7 +124,7 @@ In Arbitrary Arrays (or a thin “Rearrange” strip):
 ## Key files to touch
 
 - [`gpu_module_v7_3.py`](../gpu_module_v7_3.py) — buffer/kernel reuse; optional sparse intensity kernel
-- [`gui/panels/arbitrary_arrays.py`](../gui/panels/arbitrary_arrays.py) — trap-ready fix; WGS endpoints; I-SEH button / params
+- [`gui/panels/arbitrary_arrays/`](../gui/panels/arbitrary_arrays/) — trap-ready fix; WGS endpoints; I-SEH button / params
 - New [`iseh.py`](../iseh.py) — interpolate + sequence generation
 - [`gui/main_window.py`](../gui/main_window.py) — `updatePhase` preview bypass
 - [`libslm/slm.py`](../libslm/slm.py) — only if non-blocking/paced write helpers are needed
