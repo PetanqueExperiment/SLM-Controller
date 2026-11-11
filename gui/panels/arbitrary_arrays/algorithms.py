@@ -11,7 +11,7 @@ from typing import Callable
 import numpy as np
 
 import libslm.parameters as param
-from gpu_module_v7_3 import slm_to_trap_amp, trap_phase_to_slm
+from libslm.gpu import slm_to_trap_amp, trap_phase_to_slm
 from gui.constants import SLM_DIFFRACTION_EFFICIENCY_HWHM
 
 

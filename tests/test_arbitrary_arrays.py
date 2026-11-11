@@ -19,7 +19,7 @@ CX, CY = 0.5 * param.ImgResX, 0.5 * param.ImgResY
 
 
 def test_pure_modules_do_not_load_qt_or_gpu():
-    code = "import sys; import gui.panels.arbitrary_arrays.rois, gui.panels.arbitrary_arrays.traps, gui.panels.arbitrary_arrays.hologram_files; print('gpu_module_v7_3' in sys.modules, 'PyQt5.QtWidgets' in sys.modules)"
+    code = "import sys; import gui.panels.arbitrary_arrays.rois, gui.panels.arbitrary_arrays.traps, gui.panels.arbitrary_arrays.hologram_files; print('libslm.gpu' in sys.modules, 'PyQt5.QtWidgets' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent, check=True).stdout.split()
     assert out == ["False", "False"]
 

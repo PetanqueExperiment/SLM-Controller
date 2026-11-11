@@ -19,7 +19,7 @@
 
 Your forward hologram path **is** SEH (including axial Fresnel via `k_z`):
 
-```117:129:gpu_module_v7_3.py
+```117:129:libslm/gpu.py
      for (int n = 0 ; n < n_trap ; n++) {
              float grating = k_x[n] * i + k_y[n] * j + k_z[n]* ( (i-X_max/2) * (i-X_max/2) + (j-Y_max/2) * (j-Y_max/2) );
              ...
@@ -68,7 +68,7 @@ In [`gui/panels/arbitrary_arrays/panel.py`](../gui/panels/arbitrary_arrays/panel
 
 ### 1. Core I-SEH module (new)
 
-Add something like [`iseh.py`](../iseh.py) (pure NumPy + calls into `gpu_module_v7_3`):
+Add something like [`iseh.py`](../iseh.py) (pure NumPy + calls into `libslm.gpu`):
 
 - `wrap_delta_theta(theta0, thetaK)` → Δθ ∈ (−π, π]
 - `interpolate_frame(pos0, posK, w0, wK, theta0, thetaK, s)` → pos, w, θ (and z → k_z)
@@ -81,7 +81,7 @@ Endpoint optimization: call existing `WGS` twice (or once each on start/end trap
 
 ### 2. GPU hygiene (enough for modest hardware)
 
-In [`gpu_module_v7_3.py`](../gpu_module_v7_3.py), for streaming/precompute loops:
+In [`libslm/gpu.py`](../libslm/gpu.py), for streaming/precompute loops:
 
 - Cache `cl.Kernel` once; reuse buffers; only re-upload (k, θ, w) when they change
 - Cache `pupil_norms` when pupil is static
@@ -123,7 +123,7 @@ In Arbitrary Arrays (or a thin “Rearrange” strip):
 
 ## Key files to touch
 
-- [`gpu_module_v7_3.py`](../gpu_module_v7_3.py) — buffer/kernel reuse; optional sparse intensity kernel
+- [`libslm/gpu.py`](../libslm/gpu.py) — buffer/kernel reuse; optional sparse intensity kernel
 - [`gui/panels/arbitrary_arrays/`](../gui/panels/arbitrary_arrays/) — trap-ready fix; WGS endpoints; I-SEH button / params
 - New [`iseh.py`](../iseh.py) — interpolate + sequence generation
 - [`gui/main_window.py`](../gui/main_window.py) — `updatePhase` preview bypass

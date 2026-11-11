@@ -11,7 +11,6 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import PUPIL_VERTICAL_OFFSET, positionToStepPerPixel
-from gpu_module_v7_3 import trap_phase_to_slm
 
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI

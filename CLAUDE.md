@@ -24,6 +24,7 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
   - `slm.py` — `MeadowlarkSLM` (Blink SDK via ctypes): connect / disconnect,
     serial-number check before the LUT is loaded, `uploadHologram`,
     `readTemperature`, WFC correction, simulate mode. One SDK session per process.
+  - `gpu.py` — OpenCL hologram kernels: `trap_phase_to_slm`, `slm_to_trap_amp`.
   - `parameters.py` — optical / device constants (`f`, `M`, `pslm`, image size).
     Wavelength and P are NOT here: they come from the profile.
 - `gui/main_window.py` — `SLMGUI`: shared phase state, `updatePhase()` (the only
@@ -55,6 +56,7 @@ written to `temperature_logs/` in the repo; not in simulate mode).
   changes first.
 - Don't rename existing attributes, widgets or methods unless asked; new public
   methods use camelCase.
+- `dev/` holds development-only code (e.g. `gpu_benchmarks.py`), not used by the GUI.
 - Ignore `docs/old codes - for reference/` and `SLM_venv/` unless asked.
 
 ## Known open points (not yet verified on the lab PC)
