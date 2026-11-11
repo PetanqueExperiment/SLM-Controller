@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
@@ -14,6 +15,8 @@ import pyqtgraph.dockarea as dockarea
 
 from SLM_device import SLMDevice
 from gui.constants import DEFAULT_SLM, position_to_step_per_pixel
+from gui.defaults import STARTUP_MODES
+from gui.settings import AppSettings, readProfile, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -146,6 +149,11 @@ class SLMGUI(QtWidgets.QMainWindow):
     _dock_splitter_connected: bool
     top_menu_bar: QtWidgets.QToolBar
     top_menu_buttons: dict[str, QtWidgets.QPushButton]
+    _startup_mode_group: QtWidgets.QActionGroup
+
+    # --- Settings / profiles ---
+    settings: AppSettings  # settings/settings.json
+    current_profile: str  # name of the active profile (profiles/<name>.json)
 
     # --- Aliases of panel widgets ---
     _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
@@ -211,8 +219,12 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._state_dict = {}
 
+        self.settings = AppSettings.load()
+        self.current_profile = self.settings.startupProfile()
+
         self.initUI()
         self.initSLM()
+        self.loadProfile(self.current_profile)
 
         self._last_sent_plot.installEventFilter(self._preview)
         self._preview.ft_plot.installEventFilter(self._preview)
@@ -436,12 +448,59 @@ class SLMGUI(QtWidgets.QMainWindow):
         for label in ("Device", "Settings"):
             btn = QtWidgets.QPushButton(label)
             btn.setFixedSize(90, self.TOP_MENU_HEIGHT - 6)
-            btn.clicked.connect(lambda _checked=False, name=label: print(f"[menu] {name} clicked (not implemented)"))
             bar.addWidget(btn)
             self.top_menu_buttons[label] = btn
 
+        self.top_menu_buttons["Device"].clicked.connect(lambda _checked=False: print("[menu] Device: not implemented"))
+        self.top_menu_buttons["Settings"].setMenu(self._create_settings_menu())
+
         self.addToolBar(QtCore.Qt.TopToolBarArea, bar)
         self.top_menu_bar = bar
+
+    def _create_settings_menu(self) -> QtWidgets.QMenu:
+        """Settings drop-down: which profile is loaded when the app starts (stored in settings.json)."""
+        menu = QtWidgets.QMenu(self)
+        startup_menu = menu.addMenu("Startup profile")
+        self._startup_mode_group = QtWidgets.QActionGroup(self)
+        self._startup_mode_group.setExclusive(True)
+        for mode, label in STARTUP_MODES.items():
+            action = startup_menu.addAction(label)
+            action.setCheckable(True)
+            action.setData(mode)
+            action.setChecked(mode == self.settings.startup_mode)
+            self._startup_mode_group.addAction(action)
+        self._startup_mode_group.triggered.connect(self._on_startup_mode_selected)
+        return menu
+
+    def _on_startup_mode_selected(self, action: QtWidgets.QAction) -> None:
+        self.settings.startup_mode = str(action.data())
+        try:
+            self.settings.save()
+        except OSError as e:
+            print("Could not save settings:", e)
+            return
+        print(f"Startup profile: {STARTUP_MODES[self.settings.startup_mode]}")
+
+    def profileParams(self) -> dict[str, Any]:
+        """Parameters stored in a profile file (none yet)."""
+        return {}
+
+    def applyProfile(self, params: dict[str, Any]) -> None:
+        """Apply parameters read from a profile file (none yet)."""
+
+    def loadProfile(self, name: str) -> None:
+        """Load ``profiles/<name>.json`` (if it exists) and make it the active profile."""
+        self.current_profile = name
+        params = readProfile(name)
+        if params is None:
+            print(f"Profile {name!r}: no saved file yet, using defaults")
+            return
+        self.applyProfile(params)
+        print(f"Loaded profile {name!r}")
+
+    def saveProfile(self, name: Optional[str] = None) -> Path:
+        """Write ``profileParams()`` to ``profiles/<name>.json`` (default: active profile) and return the path."""
+        return writeProfile(name or self.current_profile, self.profileParams())
 
     def createDocks(self) -> None:
         self._d1 = dockarea.Dock("All", size=(700, 700))
@@ -582,6 +641,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         del self
 
     def closeEvent(self, err: QtGui.QCloseEvent) -> None:
+        try:
+            print("Saved profile:", self.saveProfile())
+            self.settings.last_profile = self.current_profile
+            self.settings.save()
+        except OSError as e:
+            print("Could not save profile / settings:", e)
         timer = getattr(self, "_slm_temp_timer", None)
         if timer is not None:
             timer.stop()
