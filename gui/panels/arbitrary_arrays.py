@@ -1,5 +1,7 @@
 """Arbitrary arrays panel (patterns, traps, algorithms, equalization)."""
 
+from __future__ import annotations
+
 import json
 import os
 import pickle
@@ -7,6 +9,7 @@ import random as rd
 import sys
 import time
 from importlib import reload
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pyqtgraph as pg
@@ -32,13 +35,16 @@ from gui.constants import (
 from gui.helpers import parse_pasted_coordinates
 from tweezer_array import coords_npy_to_traps_pos, rectangular_lattice_coords
 
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
+
 try:
     import trap_equalization_ramsey as trap_equalization
 except ImportError:
     trap_equalization = None
 
 
-def _pump_gui():
+def _pump_gui() -> None:
     """Flush log output and let Qt redraw while a long algorithm runs on the GUI thread."""
     try:
         sys.stdout.flush()
@@ -82,19 +88,19 @@ class Equalization_intensity_thread(QtCore.QThread):
     sigNext = pyqtSignal()
     sigLast = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self) -> None:
         QtCore.QThread.__init__(self)
         self.go_on_reading_message = False
         self.timer = QtCore.QTimer()
         self.last = False
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.wait()
 
-    def run(self):
+    def run(self) -> None:
         self.keepCheckingFile()
 
-    def keepCheckingFile(self):
+    def keepCheckingFile(self) -> None:
 
         if self.go_on_reading_message:
             # Check the file for instruction
@@ -125,7 +131,7 @@ class Equalization_intensity_thread(QtCore.QThread):
 class ArbitraryArraysPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui, parent=None):
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.gui = gui
         self._build()
@@ -134,7 +140,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         lay.setSpacing(0)
         lay.addWidget(self.root)
 
-    def _build(self):
+    def _build(self) -> None:
         """Build the ARBITRARY ARRAYS column (`self.arbitrary_arrays_panel`): patterns, traps, lattice export, algorithms."""
         self.root = pg.LayoutWidget()
         self.arbitrary_arrays_panel = self.root
@@ -253,11 +259,11 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         # self.devide_slm_area_Btn.clicked.connect(self.devide_slm_area)
         # self.computeHologram_Btn.clicked.connect(self.computeHologram_clicked)
 
-    def runAlgorithm_clicked(self):
+    def runAlgorithm_clicked(self) -> None:
         method = str(self.methodCB.currentText())
         self.runAlgorithm(method)
 
-    def runAlgorithm(self, method):
+    def runAlgorithm(self, method: str) -> None:
         '''
         This function chooses the method to calculate the phase mask for
         the desired trap positions
@@ -280,7 +286,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.phasePattern = image
         self.gui.updatePhase()
 
-    def savePattern_clicked(self):
+    def savePattern_clicked(self) -> None:
         '''
         Opens the dialog and saves the selected file
         '''
@@ -290,7 +296,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return
         self.savePattern(name=self.gui.file)
 
-    def savePattern(self, name=''):
+    def savePattern(self, name: str = '') -> None:
         '''
         Opens the dialog and saves the selected file
         '''
@@ -308,7 +314,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         pickle.dump(self.gui.traps_dict, a_file)
         a_file.close()
 
-    def loadPattern_clicked(self):
+    def loadPattern_clicked(self) -> None:
         '''
         Open the dialog and gets the selected file
         '''
@@ -318,7 +324,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return
         self.loadPattern(name=self.gui.file)
 
-    def loadPattern(self, name=''):
+    def loadPattern(self, name: str = '') -> None:
         print('SLM file')
         print(name)
         self.gui.file = name
@@ -349,7 +355,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def pack_traps_dict(self):
+    def pack_traps_dict(self) -> None:
         self.gui.traps_dict['traps_pos'] = self.gui.traps_pos
         self.gui.traps_dict['traps_k'] = self.gui.traps_k
         self.gui.traps_dict['theta_traps'] = self.gui.theta_traps
@@ -357,7 +363,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.traps_dict['pupil_traps'] = self.gui.pupil_traps
         self.gui.traps_dict['phasePattern'] = self.gui.phasePattern
 
-    def unpack_traps_dict(self):
+    def unpack_traps_dict(self) -> None:
         self.gui.traps_pos = self.gui.traps_dict['traps_pos']
         self.gui.traps_k = self.gui.traps_dict['traps_k']
         self.gui.N_traps = int(self.gui.traps_pos.shape[0])
@@ -379,12 +385,12 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
     # ==============================================================================
     # Elementary patterns
     # ==============================================================================
-    def generateBlank(self):
+    def generateBlank(self) -> None:
         '''Generates a blank phase mask'''
         self.gui.phasePattern = np.zeros([param.ImgResY, param.ImgResX])
         self.gui.updatePhase()
 
-    def _resolve_rois_json_path(self, base):
+    def _resolve_rois_json_path(self, base: str | None) -> str | None:
         """Resolve path to PyCam ``rois.json`` (``Tweezer_ROIs/`` or an existing file path)."""
         tweezer_dir = os.path.join(LOCAL_DIR, 'Tweezer_ROIs')
         base = (base or '').strip()
@@ -401,7 +407,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
                 return p_json
         return None
 
-    def _traps_ready(self):
+    def _traps_ready(self) -> bool:
         """True if trap arrays are initialized from a file or pickle (ready for algorithms)."""
         tp = getattr(self.gui, 'traps_pos', None)
         if not isinstance(tp, np.ndarray) or tp.ndim != 2 or tp.shape[1] != 4:
@@ -413,7 +419,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return False
         return True
 
-    def _load_traps_from_pattern_file(self, verbose=False):
+    def _load_traps_from_pattern_file(self, verbose: bool = False) -> bool:
         """
         Load trap coordinates from PyCam ``rois.json`` (path from `loadTrapPositionsEdt`).
         Pixel centers are converted to focal-plane positions using ``ROI_JSON_UM_PER_CAMERA_PIXEL``
@@ -461,7 +467,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self._finalize_trap_generation()
         return True
 
-    def _ensure_traps_loaded(self):
+    def _ensure_traps_loaded(self) -> bool:
         """
         Ensure `generateTraps`-equivalent state: load from the file field if not already valid
         (e.g. after loading a .pkl with traps, this is a no-op).
@@ -474,7 +480,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             print('Could not load trap coordinates. Set the rois basename ' '(Tweezer_ROIs or full path to .json).')
         return ok
 
-    def _finalize_trap_generation(self):
+    def _finalize_trap_generation(self) -> None:
         """Build k-vectors, random phases, pupils, and traps_dict from self.gui.traps_pos (meters)."""
         self.gui.N_traps = int(self.gui.traps_pos.shape[0])
         print('Traps = ', self.gui.N_traps)
@@ -517,7 +523,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             'pupil_traps': self.gui.pupil_traps,
         }
 
-    def saveArrayCoordinates_clicked(self):
+    def saveArrayCoordinates_clicked(self) -> None:
         """Save the rectangular lattice as PyCam / ROIfinder `rois.json`."""
         os.makedirs(TWEEZER_ROIS_DIR, exist_ok=True)
         default_path = os.path.join(TWEEZER_ROIS_DIR, 'rois.json')
@@ -559,7 +565,9 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.loadTrapPositionsEdt.setText(os.path.splitext(os.path.basename(path))[0])
         print('Saved PyCam ROIs:', path, '(%d centers)' % arr.shape[0])
 
-    def _save_array_rois_to_json(self, path, arr_m, sx_um, sy_um, angle_deg):
+    def _save_array_rois_to_json(
+        self, path: str, arr_m: np.ndarray, sx_um: float, sy_um: float, angle_deg: float
+    ) -> None:
         """
         UTF-8 JSON, indent=2. Schema version 2: centers, roi_sizes, x_com, y_com, angle_deg, rescale.
 
@@ -581,7 +589,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self._write_rois_json(path, centers, side, angle_deg)
 
     @staticmethod
-    def _write_rois_json(path, centers, roi_side_px, angle_deg=0.0):
+    def _write_rois_json(path: str, centers: list[list[float]], roi_side_px: int, angle_deg: float = 0.0) -> None:
         """Write a PyCam ``rois.json`` (schema version 2) with pixel ``centers`` (int or float)."""
         doc = {
             'format_version': 2,
@@ -596,7 +604,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             json.dump(doc, f, indent=2, ensure_ascii=False)
             f.write('\n')
 
-    def plotTrapsFile_clicked(self):
+    def plotTrapsFile_clicked(self) -> None:
         """Pick one or more ``rois.json`` files and overlay their trap centers (camera pixels) in one window."""
         start = self._resolve_rois_json_path(self.loadTrapPositionsEdt.text()) or TWEEZER_ROIS_DIR
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -605,7 +613,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         for path in paths:
             self._plot_traps_file(path)
 
-    def _plot_traps_file(self, path):
+    def _plot_traps_file(self, path: str) -> None:
         """Add the trap centers of one ``rois.json`` to the trap plot window (created if not open)."""
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -660,7 +668,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         win.activateWindow()
         print('Plotted %d traps from %s' % (centers.shape[0], path))
 
-    def pastedCoordsToJson_clicked(self):
+    def pastedCoordsToJson_clicked(self) -> None:
         """Convert the pasted coordinate list / np.array into a PyCam ``rois.json`` chosen via a save dialog."""
         try:
             coords = parse_pasted_coordinates(self.pastedCoordsEdt.text())
@@ -703,7 +711,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.loadTrapPositionsEdt.setText(os.path.splitext(os.path.basename(path))[0])
         print('Saved PyCam ROIs:', path, '(%d centers, roi size %d px)' % (len(centers), side))
 
-    def generateTraps(self):
+    def generateTraps(self) -> None:
         """Load trap coordinates from PyCam ``rois.json`` (see ``_load_traps_from_pattern_file``)."""
         print('Generating traps')
         self._load_traps_from_pattern_file(verbose=True)
@@ -711,7 +719,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
     # =============================================================================
     # Trap equalization using atom signal
     # ============================================================================
-    def equalize_with_atoms(self):
+    def equalize_with_atoms(self) -> None:
         print('equalize with atoms')
         signal = np.load(DIR_SHARED_DETEKTOR + '/map.npy')
         # signal += 1-np.mean(signal)
@@ -730,7 +738,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         timestr = time.strftime("%Y%m%d_%H%M%S")
         self.savePattern(name=LOCAL_DIR + '\\holograms\\equalized_with_atoms_' + timestr + '.pkl')
 
-    def devide_slm_area(self, change=True, signal=None):
+    def devide_slm_area(self, change: bool = True, signal: np.ndarray | int | None = None) -> None:
         """
         With Martin we change only part of the hologram to gain more precission in equalizing the trap intensity.
         """
@@ -784,7 +792,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         print('done partial phase correction, saved at : ' + hologram_save_file)
 
-    def devide_slm_area_loop(self, loop=None):
+    def devide_slm_area_loop(self, loop: int | None = None) -> None:
 
         global trap_equalization
         trap_equalization = reload(trap_equalization)
@@ -821,7 +829,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
     ###########################################################################
     # Algorithms for phase calculation
     ###########################################################################
-    def computeHologram_clicked(self):
+    def computeHologram_clicked(self) -> None:
         print('Computed hologram')
         phi = self.computeHologram()
         if phi is None:
@@ -829,7 +837,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.phasePattern = phi
         self.gui.updatePhase()
 
-    def computeHologram(self):
+    def computeHologram(self) -> np.ndarray | None:
         if not self._ensure_traps_loaded():
             return None
         # Calculate phase pattern with homemade gpu function
@@ -843,7 +851,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def randomMask(self):
+    def randomMask(self) -> np.ndarray | None:
         '''
         random mask (RM)
         '''
@@ -862,7 +870,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def superposition(self):
+    def superposition(self) -> np.ndarray | None:
         '''
         superposition of gratings and lenses (S)
         '''
@@ -875,7 +883,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def randomSuperposition(self):
+    def randomSuperposition(self) -> np.ndarray | None:
         '''
         Superposition of gratings with random phases.
         '''
@@ -888,7 +896,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def GS(self):
+    def GS(self) -> np.ndarray | None:
         '''
         Gerchberg−Saxton (GS). Optimize the phase of each grating.
         '''
@@ -946,7 +954,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def WGS(self, correct_diffraction_efficiency=False):
+    def WGS(self, correct_diffraction_efficiency: bool = False) -> np.ndarray | None:
         '''
         Weighted Gerchberg−Saxton (GS). Otpimize the phase and weigth of each grating.
         '''
@@ -1029,7 +1037,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def GS_intensity(self, measured_intensities, equalize_gain=1.0):
+    def GS_intensity(self, measured_intensities: np.ndarray, equalize_gain: float = 1.0) -> np.ndarray | None:
         '''
         Adjust the weight of each trap according to the measured intensities
         Keep the same phase for each trap
@@ -1045,13 +1053,14 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-    def GAA(self):
+    def GAA(self) -> np.ndarray | None:
         '''
         Generalized adaptive additive
         '''
         if not self._ensure_traps_loaded():
             return None
         GAA_maxit = int(self.iterationsEdit.text())
+        norm = 1 / param.ImgResY / param.ImgResX
         Vtraps_it = np.zeros(self.gui.N_traps, dtype=complex)
 
         phi = self.randomSuperposition()
@@ -1061,12 +1070,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         # Measure the trap to trap deviation of intensity
         for k in range(self.gui.N_traps):
-            Vtraps_it[k] = (
-                1
-                / param.ImgResY
-                / param.ImgResX
-                * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, k])), axis=0), axis=0)
-            )
+            Vtraps_it[k] = norm * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, k])), axis=0), axis=0)
         trap_intensities = np.real(Vtraps_it * np.conj(Vtraps_it))
         efficiency = np.sum(trap_intensities)
         uniformity = np.std(trap_intensities) / np.mean(trap_intensities)
@@ -1077,23 +1081,11 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
             print('Iteration ' + str(k + 1) + '/' + str(GAA_maxit))
             Vtraps_it_mod = np.sqrt(Vtraps_it * np.conj(Vtraps_it))
-            phi = np.angle(
-                np.sum(
-                    np.exp(1j * self.gui.delta_traps)
-                    * Vtraps_it
-                    / Vtraps_it_mod
-                    * (1 - self.gui.GAA_xi + self.gui.GAA_xi / Vtraps_it_mod),
-                    axis=2,
-                )
-            )
+            gain = 1 - self.gui.GAA_xi + self.gui.GAA_xi / Vtraps_it_mod
+            phi = np.angle(np.sum(np.exp(1j * self.gui.delta_traps) * Vtraps_it / Vtraps_it_mod * gain, axis=2))
 
             for j in range(self.gui.N_traps):
-                Vtraps_it[j] = (
-                    1
-                    / param.ImgResY
-                    / param.ImgResX
-                    * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, j])), axis=0), axis=0)
-                )
+                Vtraps_it[j] = norm * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, j])), axis=0), axis=0)
             trap_intensities = Vtraps_it * np.conj(Vtraps_it)
             efficiency = np.real(np.sum(trap_intensities))
             uniformity = np.std(trap_intensities) / np.mean(trap_intensities)

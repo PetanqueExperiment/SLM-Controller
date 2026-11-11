@@ -17,21 +17,25 @@ grating and Zernike values is published on the ``static_changed`` event as
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING, Any, Callable
 
 from pyqtgraph.Qt import QtCore
 
 from heros import LocalHERO, event
 from heros.event import reliable
 
-HERO_NAME = "SLM_Controller"
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
 
-GRATING_X = "grating_x"
-GRATING_Y = "grating_y"
+HERO_NAME: str = "SLM_Controller"
+
+GRATING_X: str = "grating_x"
+GRATING_Y: str = "grating_y"
 
 
-def static_snapshot(gui) -> dict:
+def static_snapshot(gui: SLMGUI) -> dict[str, float]:
     """Current ``{param_id: value}`` for every sequencer-visible parameter of ``gui``."""
-    values = {GRATING_X: float(gui.dx), GRATING_Y: float(gui.dy)}
+    values: dict[str, float] = {GRATING_X: float(gui.dx), GRATING_Y: float(gui.dy)}
     for label, v in zip(gui.aberration_label_list, gui.aberration_values):
         values[label] = float(v)
     return values
@@ -42,21 +46,21 @@ class _GuiInvoker(QtCore.QObject):
 
     _call = QtCore.Signal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
         self._call.connect(self._run, QtCore.Qt.BlockingQueuedConnection)
 
     @QtCore.Slot(object)
-    def _run(self, job):
+    def _run(self, job: Callable[[], None]) -> None:
         job()
 
-    def invoke(self, fn, *args, **kwargs):
+    def invoke(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         if QtCore.QThread.currentThread() == self.thread():
             return fn(*args, **kwargs)
 
-        result = {}
+        result: dict[str, Any] = {}
 
-        def job():
+        def job() -> None:
             try:
                 result["value"] = fn(*args, **kwargs)
             except Exception as exc:
@@ -71,7 +75,7 @@ class _GuiInvoker(QtCore.QObject):
 class SLMHero(LocalHERO):
     """Remote access to the grating shift and Zernike coefficients of ``SLMGUI``."""
 
-    def __init__(self, gui, name: str = HERO_NAME, *args, **kwargs):
+    def __init__(self, gui: SLMGUI, name: str = HERO_NAME, *args: Any, **kwargs: Any) -> None:
         super().__init__(name, tags=["device:SLM"], *args, **kwargs)
         self._gui = gui
         self._invoker = _GuiInvoker()
@@ -90,7 +94,7 @@ class SLMHero(LocalHERO):
         """Emit ``static_changed`` with all current values (GUI thread)."""
         self.static_changed(static_snapshot(self._gui))
 
-    def _on_gui(self, fn, *args, **kwargs):
+    def _on_gui(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         with self._lock:
             return self._invoker.invoke(fn, *args, **kwargs)
 
@@ -147,7 +151,7 @@ class SLMHero(LocalHERO):
 
     # ---- GUI-thread internals ----------------------------------------------
 
-    def _set_grating(self, dx, dy):
+    def _set_grating(self, dx: float | None, dy: float | None) -> list[float]:
         if dx is not None:
             self._gui.dx = dx
         if dy is not None:
@@ -155,10 +159,10 @@ class SLMHero(LocalHERO):
         self._gui.elementary.createGratingPattern(self._gui.dx, self._gui.dy)
         return [float(self._gui.dx), float(self._gui.dy)]
 
-    def _zernike_dict(self):
+    def _zernike_dict(self) -> dict[str, float]:
         return {label: float(v) for label, v in zip(self._gui.aberration_label_list, self._gui.aberration_values)}
 
-    def _set_zernike(self, coefficients):
+    def _set_zernike(self, coefficients: dict[str, float]) -> dict[str, float]:
         labels = list(self._gui.aberration_label_list)
         unknown = [k for k in coefficients if k not in labels]
         if unknown:

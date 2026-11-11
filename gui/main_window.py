@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 # Fraction of the window height given to the bottom Output (log) dock;
 # the remaining height goes to the main "All" dock.
-OUTPUT_HEIGHT_FRACTION = 0.10
+OUTPUT_HEIGHT_FRACTION: float = 0.10
 
 
 class SLMMode:
@@ -144,6 +144,8 @@ class SLMGUI(QtWidgets.QMainWindow):
     _output: OutputDock
     _dock_ratio_user_set: bool
     _dock_splitter_connected: bool
+    top_menu_bar: QtWidgets.QToolBar
+    top_menu_buttons: dict[str, QtWidgets.QPushButton]
 
     # --- Aliases of panel widgets ---
     _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
@@ -190,7 +192,14 @@ class SLMGUI(QtWidgets.QMainWindow):
     _slm_temp_timer: QtCore.QTimer
     _temp_log_error_reported: bool
 
-    def __init__(self, parent=None, selected_SLM=DEFAULT_SLM, simulate=False, start_hero=False, hero_name=None):
+    def __init__(
+        self,
+        parent: Optional[QtWidgets.QWidget] = None,
+        selected_SLM: str = DEFAULT_SLM,
+        simulate: bool = False,
+        start_hero: bool = False,
+        hero_name: Optional[str] = None,
+    ) -> None:
         super(SLMGUI, self).__init__()
 
         if parent:
@@ -218,7 +227,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         if start_hero:
             self._start_hero(hero_name)
 
-    def _start_hero(self, name=None):
+    def _start_hero(self, name: Optional[str] = None) -> None:
         """Expose grating shift + Zernike coefficients over HEROS (optional dependency)."""
         try:
             from gui.hero import HERO_NAME, SLMHero
@@ -233,12 +242,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             print("HERO could not be started:", e)
 
-    def _stop_hero(self):
+    def _stop_hero(self) -> None:
         hero, self._hero = getattr(self, "_hero", None), None
         if hero is not None:
             hero.__exit__(None, None, None)
 
-    def _publish_static_changes(self):
+    def _publish_static_changes(self) -> None:
         """Tell HERO listeners (the sequencer) about grating / Zernike changes."""
         hero = getattr(self, "_hero", None)
         if hero is None:
@@ -248,7 +257,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             print("HERO static_changed publish failed:", e)
 
-    def _wire_remote_control(self):
+    def _wire_remote_control(self) -> None:
         self._remote_control = {
             "SLM1 x": self.elementary.updateHorizontalGrating,
             "SLM1 y": self.elementary.updateVerticalGrating,
@@ -269,7 +278,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             "SLM1: trefoil2 90": self.aberration.updateAberration_trefoil2_90,
         }
 
-    def state_to_dict(self):
+    def state_to_dict(self) -> None:
         save_list = ["dx", "dy", "aberration_values", "file", "spacing", "theta_deg", "r_pi"]
 
         for instance_name in save_list:
@@ -279,7 +288,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._state_dict["SO_check"] = self.SOChkBx.isChecked()
         self._state_dict["LG_check"] = self.LGChkBx.isChecked()
 
-    def dict_to_state(self, memory_dict):
+    def dict_to_state(self, memory_dict: dict[str, Any]) -> None:
         try:
             self.elementary.createGratingPattern(dx=memory_dict["dx"], dy=memory_dict["dy"])
             self.aberration.updateAberration(aber_list=memory_dict["aberration_values"])
@@ -294,7 +303,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             print(e)
 
-    def initSLM(self):
+    def initSLM(self) -> None:
         self.SLM = SLMDevice(self._selected_SLM, simulate=self._simulate_slm)
 
         if getattr(self.SLM, "simulated", False):
@@ -336,7 +345,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.elementary.createGratingPattern(self.dx, self.dy)
         self.updatePhase()
 
-    def initUI(self):
+    def initUI(self) -> None:
         self.dx = 0
         self.dy = 0
 
@@ -359,23 +368,8 @@ class SLMGUI(QtWidgets.QMainWindow):
             "trefoil 2nd 0",
             "trefoil 2nd 90",
         ]
-        self.aberration_poly_indices = [
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,  # defocus … trefoil
-            10,
-            11,
-            12,
-            13,
-            14,  # asti/coma 2nd, 2nd spherical
-            17,
-            18,  # trefoil 2nd (Z19/Z20); skip tetrafoil 15–16
-        ]
+        # defocus … trefoil, asti/coma 2nd, 2nd spherical, trefoil 2nd (Z19/Z20); skip tetrafoil 15–16
+        self.aberration_poly_indices = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18]
         # First N labels go in the left column; the rest are 2nd-order (right column).
         self.aberration_n_primary = 8
         self.aberration_poly_offset = 2  # fallback if poly_indices missing
@@ -426,9 +420,9 @@ class SLMGUI(QtWidgets.QMainWindow):
         for key in self.methodList:
             self._arbitrary.methodCB.addItem(key)
 
-    TOP_MENU_HEIGHT = 32
+    TOP_MENU_HEIGHT: int = 32
 
-    def _create_top_menu(self):
+    def _create_top_menu(self) -> None:
         """Fixed horizontal button bar at the top of the window (placeholder actions)."""
         bar = QtWidgets.QToolBar("Top menu", self)
         bar.setObjectName("topMenuBar")
@@ -449,7 +443,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.addToolBar(QtCore.Qt.TopToolBarArea, bar)
         self.top_menu_bar = bar
 
-    def createDocks(self):
+    def createDocks(self) -> None:
         self._d1 = dockarea.Dock("All", size=(700, 700))
         self.area.addDock(self._d1, "left")
         self._d1.hideTitleBar()
@@ -505,7 +499,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._output = OutputDock(self)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
         # Re-apply the Output/main height split on every window resize until
         # the user drags the splitter themselves. Deferred so the dock
@@ -513,10 +507,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         if hasattr(self, "d_output") and not self._dock_ratio_user_set:
             QtCore.QTimer.singleShot(0, self._apply_dock_ratio)
 
-    def _on_dock_splitter_moved(self, *_):
+    def _on_dock_splitter_moved(self, *_: Any) -> None:
         self._dock_ratio_user_set = True
 
-    def _apply_dock_ratio(self):
+    def _apply_dock_ratio(self) -> None:
         """Give the Output dock OUTPUT_HEIGHT_FRACTION of the dock area height
         and the rest to the docks above it."""
         splitter = self.d_output.container()
@@ -542,7 +536,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             new_sizes[i] = int(rest * (sizes[i] or 1) / other_total)
         splitter.setSizes(new_sizes)
 
-    def _install_gui_stdio(self):
+    def _install_gui_stdio(self) -> None:
         self._stdout_prev = sys.stdout
         self._stderr_prev = sys.stderr
         self._stdout_tee = StreamToPlainText(self._stdout_prev, self.output_log, parent=self)
@@ -550,20 +544,20 @@ class SLMGUI(QtWidgets.QMainWindow):
         sys.stdout = self._stdout_tee
         sys.stderr = self._stderr_tee
 
-    def _restore_stdio(self):
+    def _restore_stdio(self) -> None:
         if getattr(self, "_stdout_prev", None) is not None:
             sys.stdout = self._stdout_prev
         if getattr(self, "_stderr_prev", None) is not None:
             sys.stderr = self._stderr_prev
 
-    def adjustImageForS1028(self, array):
+    def adjustImageForS1028(self, array: np.ndarray) -> np.ndarray:
         v_s, h_s = 1024, 1272
         v, h = array.shape
         converted_array = np.zeros([v_s, h_s])
         converted_array[(v_s - v) // 2 : (v_s + v) // 2, (h_s - h) // 2 : (h_s + h) // 2] = np.fliplr(array)
         return converted_array
 
-    def updatePhase(self):
+    def updatePhase(self) -> None:
         self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
 
         if self._ManufacturerCorrectionChkBx.isChecked():
@@ -580,14 +574,14 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._publish_static_changes()
         self._preview._update_last_sent_preview()
 
-    def __del__(self):
+    def __del__(self) -> None:
         plt.close("all")
         print("closing all")
         self.SLM.close()
         del self.SLM
         del self
 
-    def closeEvent(self, err):
+    def closeEvent(self, err: QtGui.QCloseEvent) -> None:
         timer = getattr(self, "_slm_temp_timer", None)
         if timer is not None:
             timer.stop()

@@ -1,20 +1,27 @@
 """Last-sent hologram preview, its Fourier intensity, and temperature label."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 from temperature_log import DailyTemperatureLog
 
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
+
 
 class LastSentPreviewPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui, parent=None):
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.gui = gui
         self._ft_auto_levels = True
-        self._ft_levels = None  # (lo, hi) while manual
+        self._ft_levels: tuple[float, float] | None = None  # (lo, hi) while manual
         self._ft_level_edits_guard = False
         self._ft_view_auto = True  # False after user zooms/pans; Home restores
         self._build()
@@ -23,7 +30,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         lay.setSpacing(0)
         lay.addWidget(self.root)
 
-    def _build(self):
+    def _build(self) -> None:
         """Side-by-side: last hologram sent (left) and |FFT|² (right)."""
         self.root = pg.LayoutWidget()
         self.last_sent_preview_layout = self.root
@@ -153,7 +160,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.last_sent_preview_layout.addWidget(self.ft_levels_row, row=2, col=1)
         self.last_sent_preview_layout.addWidget(self.label_slm_temperature, row=3, col=0, colspan=2)
 
-    def _start_slm_temperature_monitor(self):
+    def _start_slm_temperature_monitor(self) -> None:
         """Poll Read_SLM_temperature once per second and log each sample."""
         self.gui._temperature_log = DailyTemperatureLog()
         self.gui._temp_log_error_reported = False
@@ -163,7 +170,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self._refresh_slm_temperature()
         self.gui._slm_temp_timer.start()
 
-    def _refresh_slm_temperature(self):
+    def _refresh_slm_temperature(self) -> None:
         comm = getattr(getattr(self.gui, "SLM", None), "communication", None)
         if comm is None:
             self.label_slm_temperature.setText("SLM temperature: —")
@@ -181,7 +188,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
                 self.gui._temp_log_error_reported = True
                 print(f"Temperature log write failed: {exc}")
 
-    def _fit_view_to_image(self, plot, arr):
+    def _fit_view_to_image(self, plot: pg.PlotWidget, arr: np.ndarray) -> None:
         """Lock a plot view to the full array so resize does not crop the image."""
         arr = np.asarray(arr)
         if arr.ndim != 2:
@@ -189,15 +196,15 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         ny, nx = arr.shape
         plot.getViewBox().setRange(xRange=(0, nx), yRange=(0, ny), padding=0)
 
-    def _fit_last_sent_view_to_image(self):
+    def _fit_last_sent_view_to_image(self) -> None:
         if not hasattr(self.gui, "totalPhase"):
             return
         self._fit_view_to_image(self.last_sent_plot, self.gui.totalPhase)
 
-    def _on_ft_view_changed_manually(self, *args):
+    def _on_ft_view_changed_manually(self, *args: Any) -> None:
         self._ft_view_auto = False
 
-    def _set_ft_mouse_mode(self, mode):
+    def _set_ft_mouse_mode(self, mode: str) -> None:
         """mode: 'zoom' (rectangle) or 'pan'."""
         vb = self.ft_plot.getViewBox()
         if mode == "pan":
@@ -211,7 +218,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             if hasattr(vb, "setMouseMode"):
                 vb.setMouseMode(vb.RectMode)
 
-    def _ft_home_view(self):
+    def _ft_home_view(self) -> None:
         """Reset FT view to the full |FFT|² image (matplotlib Home)."""
         self._ft_view_auto = True
         img = self.ft_img_item.image
@@ -220,7 +227,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         elif hasattr(self.gui, "totalPhase"):
             self._fit_view_to_image(self.ft_plot, self.gui.totalPhase)
 
-    def _hologram_fft_intensity(self, hologram_u8):
+    def _hologram_fft_intensity(self, hologram_u8: np.ndarray) -> np.ndarray | None:
         """
         Optical far-field intensity from the uint8 SLM hologram:
 
@@ -238,7 +245,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         return np.abs(ft) ** 2
 
     @staticmethod
-    def _off_center_mask(shape, radius_frac=0.03):
+    def _off_center_mask(shape: tuple[int, int], radius_frac: float = 0.03) -> np.ndarray:
         """Boolean mask True away from a disk around the FFT origin (zero order)."""
         ny, nx = shape
         cy, cx = (ny - 1) / 2.0, (nx - 1) / 2.0
@@ -246,7 +253,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         r0 = radius_frac * min(ny, nx)
         return (yy - cy) ** 2 + (xx - cx) ** 2 > r0**2
 
-    def _compute_ft_auto_levels(self, intensity):
+    def _compute_ft_auto_levels(self, intensity: np.ndarray) -> tuple[float, float]:
         """Percentile limits from off-center pixels (avoids zero-order dominance)."""
         mask = self._off_center_mask(intensity.shape)
         vals = intensity[mask] if mask.any() else intensity.ravel()
@@ -260,7 +267,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
                 hi = lo + 1.0
         return max(0.0, lo), hi
 
-    def _connect_ft_colorbar_levels(self):
+    def _connect_ft_colorbar_levels(self) -> None:
         """Keep spin/line edits and stored levels in sync when the bar is dragged."""
         for sig_name in ("sigLevelsChangeFinished", "sigLevelsChanged"):
             sig = getattr(self.ft_colorbar, sig_name, None)
@@ -268,7 +275,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
                 sig.connect(self._on_ft_colorbar_levels)
                 return
 
-    def _on_ft_colorbar_levels(self, *args):
+    def _on_ft_colorbar_levels(self, *args: Any) -> None:
         levels = None
         if args:
             try:
@@ -286,7 +293,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self._ft_levels = (lo, hi)
         self._sync_ft_level_edits(lo, hi)
 
-    def _read_ft_levels_from_widgets(self):
+    def _read_ft_levels_from_widgets(self) -> tuple[float, float] | None:
         try:
             levels = self.ft_colorbar.levels()
             return float(levels[0]), float(levels[1])
@@ -298,7 +305,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         except Exception:
             return None
 
-    def _sync_ft_level_edits(self, lo, hi):
+    def _sync_ft_level_edits(self, lo: float, hi: float) -> None:
         self._ft_level_edits_guard = True
         try:
             self.ft_vmin_edit.setText("%.6g" % lo)
@@ -306,7 +313,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         finally:
             self._ft_level_edits_guard = False
 
-    def _apply_ft_levels(self, lo, hi):
+    def _apply_ft_levels(self, lo: float, hi: float) -> None:
         if hi <= lo:
             return
         self._ft_auto_levels = False
@@ -318,7 +325,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             self.ft_colorbar.setLevels((lo, hi))
         self._sync_ft_level_edits(lo, hi)
 
-    def _apply_ft_levels_from_edits(self):
+    def _apply_ft_levels_from_edits(self) -> None:
         if self._ft_level_edits_guard:
             return
         try:
@@ -332,13 +339,13 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             return
         self._apply_ft_levels(lo, hi)
 
-    def _auto_ft_levels_clicked(self):
+    def _auto_ft_levels_clicked(self) -> None:
         self._ft_auto_levels = True
         self._ft_levels = None
         if hasattr(self.gui, "totalPhase"):
             self._update_ft_preview(self.gui.totalPhase)
 
-    def _update_ft_preview(self, hologram_u8):
+    def _update_ft_preview(self, hologram_u8: np.ndarray) -> None:
         """Show |FFT|² on a linear color scale (manual limits preserved until Auto)."""
         intensity = self._hologram_fft_intensity(hologram_u8)
         if intensity is None:
@@ -359,7 +366,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         if self._ft_view_auto:
             self._fit_view_to_image(self.ft_plot, intensity)
 
-    def _update_last_sent_preview(self):
+    def _update_last_sent_preview(self) -> None:
         """Show the buffer last passed to the SLM and its Fourier intensity."""
         arr = np.asarray(self.gui.totalPhase)
         self.last_sent_img_item.setImage(arr, autoLevels=False, levels=[0, 255])
@@ -367,7 +374,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self._fit_last_sent_view_to_image()
         self._update_ft_preview(arr)
 
-    def eventFilter(self, watched, event):
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
         """Keep image previews scaled to the full frame when a plot is resized."""
         if event.type() != QtCore.QEvent.Resize:
             return super().eventFilter(watched, event)

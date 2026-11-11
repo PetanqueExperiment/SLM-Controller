@@ -1,18 +1,25 @@
 """Output dock (stdout/stderr log)."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pyqtgraph as pg
 import pyqtgraph.dockarea as dockarea
 from pyqtgraph.Qt import QtGui, QtWidgets
+
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
 
 
 class OutputDock:
     """Creates the bottom Output dock and attaches it to ``gui.area``."""
 
-    def __init__(self, gui):
+    def __init__(self, gui: SLMGUI) -> None:
         self.gui = gui
         self._build()
 
-    def _build(self):
+    def _build(self) -> None:
         """Dock showing print() / stdout / stderr (see _install_gui_stdio)."""
         self.gui.d_output = dockarea.Dock("Output", size=(800, 160))
         out_wrap = pg.LayoutWidget()

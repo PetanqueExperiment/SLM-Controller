@@ -1,9 +1,9 @@
 """SLM Controller GUI package."""
 
-__all__ = ["SLMGUI"]
+__all__: list[str] = ["SLMGUI"]
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> type:
     if name == "SLMGUI":
         from gui.main_window import SLMGUI
 

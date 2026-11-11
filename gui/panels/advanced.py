@@ -1,5 +1,9 @@
 """Advanced control panel (corrections, pupil, dormant TEM01/SO/LG)."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
@@ -9,11 +13,14 @@ from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import PUPIL_VERTICAL_OFFSET, position_to_step_per_pixel
 from gpu_module_v7_3 import trap_phase_to_slm
 
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
+
 
 class AdvancedControlPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui, parent=None):
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.gui = gui
         self._build()
@@ -22,7 +29,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         lay.setSpacing(0)
         lay.addWidget(self.root)
 
-    def _build(self):
+    def _build(self) -> None:
         """Corrections, pupil, traps, SO, LG (`self.w7`)."""
         self.root = pg.LayoutWidget()
         self.Advanced_control_layout = self.root
@@ -158,11 +165,11 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         # self.LGCenterEdt_x0.returnPressed.connect(self.createLGtrap)
         # self.LGCenterEdt_y0.returnPressed.connect(self.createLGtrap)
 
-    def update_k_dump(self):
+    def update_k_dump(self) -> None:
         d_out = float(self.gui.pupilOutLineEdit.text())
         self.gui.k_dump = np.array([d_out, 0]) * 1e-6 * position_to_step_per_pixel
 
-    def calculatePupil(self):
+    def calculatePupil(self) -> None:
         d_out = float(self.gui.pupilOutLineEdit.text())
         dphi_x = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
         dphi_y = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
@@ -212,7 +219,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def applyPupil(self):
+    def applyPupil(self) -> None:
         '''
         Create an artificial pupil limiting the NA of the trap.
 
@@ -268,7 +275,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.gui.totalPhase *= self.gui.pupil
         self.gui.totalPhase += self.gui.grating_out
 
-    def apply_pupil_longaxis_byatom_loop(self, longaxis_ratio=1.0):
+    def apply_pupil_longaxis_byatom_loop(self, longaxis_ratio: float = 1.0) -> None:
         txt = self.gui.pupilEdt.text()
         width, height, θ = np.array(txt.split(','), dtype='float')
 
@@ -279,7 +286,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def apply_pupil_shortaxis_byatom_loop(self, shortaxis_ratio=1.0):
+    def apply_pupil_shortaxis_byatom_loop(self, shortaxis_ratio: float = 1.0) -> None:
         txt = self.gui.pupilEdt.text()
         width, height, θ = np.array(txt.split(','), dtype='float')
 
@@ -290,7 +297,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def createOvulaDisk(self):
+    def createOvulaDisk(self) -> None:
         '''
         Make the so-called ovula trap
 
@@ -309,7 +316,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.gui.phi_ovula = phi_ovula
         self.gui.updatePhase()
 
-    def createTEM01trap(self, value=None):
+    def createTEM01trap(self, value: float | None = None) -> None:
         '''
         Make the TEM01-like traps
         Make a patten with a 0-pi phase difference between upper and lower side
@@ -328,22 +335,15 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
         y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
         X, Y = np.meshgrid(x, y)
-        amp_list = np.sin(
-            -2
-            * np.pi
-            * 0.5
-            * self.gui.spacing
-            * 1e-6
-            * (np.cos(theta_rad) * Y + np.sin(theta_rad) * X)
-            / (param.lamb * param.f / param.M)
-        )
+        proj = np.cos(theta_rad) * Y + np.sin(theta_rad) * X
+        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (param.lamb * param.f / param.M))
         phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
         phi_tem01 = phase_list[0, :, :]
 
         self.gui.phi_tem01 = phi_tem01
         self.gui.updatePhase()
 
-    def createTEM01trap_angle(self, value=None):
+    def createTEM01trap_angle(self, value: float | None = None) -> None:
         '''
         Make the TEM01-like traps(change the angle)
 
@@ -365,22 +365,15 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
         y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
         X, Y = np.meshgrid(x, y)
-        amp_list = np.sin(
-            -2
-            * np.pi
-            * 0.5
-            * self.gui.spacing
-            * 1e-6
-            * (np.cos(theta_rad) * Y + np.sin(theta_rad) * X)
-            / (param.lamb * param.f / param.M)
-        )
+        proj = np.cos(theta_rad) * Y + np.sin(theta_rad) * X
+        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (param.lamb * param.f / param.M))
         phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
         phi_tem01 = phase_list[0, :, :]
 
         self.gui.phi_tem01 = phi_tem01
         self.gui.updatePhase()
 
-    def createSOtrap(self, value=None):
+    def createSOtrap(self, value: float | None = None) -> None:
         '''
         Make the superoscillation traps
         Make a circular patten with a 0-pi phase difference between center and outer region
@@ -407,7 +400,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.gui.phi_SO = phi_SO
         self.gui.updatePhase()
 
-    def createLGtrap(self):
+    def createLGtrap(self) -> None:
         '''
         Make the Laguerre-Gaussian 01 mode traps.
         Make a spiral phase patten from 0 to 2 pi corresponding to the polar angle.
@@ -428,7 +421,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.gui.phi_LG = phi_LG
         self.gui.updatePhase()
 
-    def generateLGMask(self):
+    def generateLGMask(self) -> np.ndarray:
         '''
         Generates the phase mask for Laguerre-Gauss beams
 
@@ -441,14 +434,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         if self.gui.angularM == 0:
             image = np.zeros([param.ImgResY, param.ImgResX])
         else:
-            image = np.angle(
-                np.exp(
-                    (
-                        self.gui.angularM
-                        * np.angle((self.gui.X - self.gui.ImgCenterX) + (self.gui.Y - self.gui.ImgCenterY) * 1j)
-                    )
-                    * 1j
-                )
-            )
+            z = (self.gui.X - self.gui.ImgCenterX) + (self.gui.Y - self.gui.ImgCenterY) * 1j
+            image = np.angle(np.exp((self.gui.angularM * np.angle(z)) * 1j))
 
         return image

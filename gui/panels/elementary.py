@@ -1,5 +1,9 @@
 """Elementary control panel (grating / Fresnel / wavelength)."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
@@ -7,11 +11,14 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
+
 
 class ElementaryControlPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui, parent=None):
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.gui = gui
         self._build()
@@ -20,7 +27,7 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         lay.setSpacing(0)
         lay.addWidget(self.root)
 
-    def _build(self):
+    def _build(self) -> None:
         """Grating / Fresnel / wavelength column (`self.w6`)."""
         self.root = pg.LayoutWidget()
         self.w6 = self.root
@@ -68,24 +75,24 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.paramPEdt.returnPressed.connect(self.updateParamP)  # 2020/01/27
         self.paramWavelengthEdit.returnPressed.connect(self.updateParamWavelength)
 
-    def moveLeft(self):
+    def moveLeft(self) -> None:
         self.gui.dx = self.gui.dx - self.gui.deltax
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def moveRight(self):
+    def moveRight(self) -> None:
         self.gui.dx = self.gui.dx + self.gui.deltax
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def moveUp(self):
+    def moveUp(self) -> None:
         self.gui.dy = self.gui.dy + self.gui.deltay
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def moveDown(self):
+    def moveDown(self) -> None:
         self.gui.dy = self.gui.dy - self.gui.deltay
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
     @staticmethod
-    def _set_float_line_edit(edit, value):
+    def _set_float_line_edit(edit: QtWidgets.QLineEdit, value: float) -> None:
         """
         Write ``value`` into a float line edit without disturbing the text/cursor
         when the numeric value is already the same (e.g. Enter after Up/Down).
@@ -113,15 +120,15 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         edit.setText(newtext)
         edit.setCursorPosition(min(max(0, cpos + len(newtext) - len(text)), len(newtext)))
 
-    def updateHorizontalGrating(self, x):
+    def updateHorizontalGrating(self, x: float) -> None:
         self.gui.dx = x
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def updateVerticalGrating(self, y):
+    def updateVerticalGrating(self, y: float) -> None:
         self.gui.dy = y
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def updatePositionGrating(self):
+    def updatePositionGrating(self) -> None:
         '''
         Updates the grating with the values in the interface
         '''
@@ -129,21 +136,21 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.gui.dy = float(self.position_yEdt.text())
         self.createGratingPattern(self.gui.dx, self.gui.dy)
 
-    def updateStepGrating(self):
+    def updateStepGrating(self) -> None:
         '''Updates the grating step when a return is pressed in the field'''
         self.gui.deltax = float(self.stepGratingEdit.text())
         self.gui.deltay = self.gui.deltax
 
-    def updateParamP(self):
+    def updateParamP(self) -> None:
         '''Updates the P parameter when a return is pressed in the field'''
         self.gui.param_P = float(self.paramPEdt.text())
         self.gui.updatePhase()
 
-    def updateParamWavelength(self):
+    def updateParamWavelength(self) -> None:
         param.lamb = float(self.paramWavelengthEdit.text()) * 1e-9
         position_to_step_per_pixel = 2 * np.pi / param.lamb * (param.M / param.f) * param.pslm
 
-    def createGratingPattern(self, dx, dy):
+    def createGratingPattern(self, dx: float, dy: float) -> None:
         '''
         Create the grating phase pattern with user-defined wavevectors kx and ky
 
@@ -169,7 +176,7 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.gui.im_grating = self.gui.X * dphi_x + self.gui.Y * dphi_y
         self.gui.updatePhase()
 
-    def createFresnelPattern(self, dz=None):
+    def createFresnelPattern(self, dz: float | None = None) -> None:
         '''
         Creates a Fresnel lens pattern with a user-defined defocus
         '''

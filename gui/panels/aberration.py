@@ -1,5 +1,9 @@
 """Aberration / Zernike control panel."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Sequence
+
 import json
 import os
 
@@ -10,11 +14,14 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import ZERNIKE_CORRECTIONS_DIR, ZERNIKE_DEFAULT_COEFFS_JSON
 
+if TYPE_CHECKING:
+    from gui.main_window import SLMGUI
+
 
 class AberrationControlPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
-    def __init__(self, gui, parent=None):
+    def __init__(self, gui: SLMGUI, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.gui = gui
         self._build()
@@ -23,7 +30,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
         lay.setSpacing(0)
         lay.addWidget(self.root)
 
-    def _build(self):
+    def _build(self) -> None:
         """Zernike / aberration fields: primary (left) and 2nd-order (right)."""
         self.root = pg.LayoutWidget()
         self.Abberation_control_layout = self.root
@@ -41,7 +48,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
 
         self.aber_lineEdit_list = []
 
-        def _add_aber_field(name, row, label_col, edit_col):
+        def _add_aber_field(name: str, row: int, label_col: int, edit_col: int) -> None:
             label = QtWidgets.QLabel(name)
             lineEdit = MyQtLineEdit("0")
             lineEdit.setFixedWidth(50)
@@ -78,14 +85,14 @@ class AberrationControlPanel(QtWidgets.QWidget):
         self.loadZernikeCoeffsBtn.clicked.connect(self._load_zernike_coefficients_json)
         self.saveZernikeCoeffsBtn.clicked.connect(self._save_zernike_coefficients_json)
 
-    def _poly_index(self, ui_index):
+    def _poly_index(self, ui_index: int) -> int:
         """Map UI line-edit index → Zernike polynomial index (tip/tilt omitted)."""
         indices = getattr(self.gui, "aberration_poly_indices", None)
         if indices is not None:
             return int(indices[int(ui_index)])
         return int(ui_index) + int(getattr(self.gui, "aberration_poly_offset", 2))
 
-    def updateAberration(self, aber_list=[]):
+    def updateAberration(self, aber_list: Sequence[float] | None = []) -> None:
         zernike_fit = np.zeros_like(self.gui.zernike_polynomials[0])
         zernike_coeff = []
         N_poly = len(self.gui.aber_lineEdit_list)
@@ -105,7 +112,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def updateAberration_ext(self, aberration_index, aberration_value):
+    def updateAberration_ext(self, aberration_index: int, aberration_value: float) -> None:
 
         zernike_fit = np.zeros_like(self.gui.zernike_polynomials[0])
         zernike_coeff = []
@@ -125,52 +132,52 @@ class AberrationControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def updateAberration_defocus(self, value):
+    def updateAberration_defocus(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=0, aberration_value=value)
 
-    def updateAberration_asti0(self, value):
+    def updateAberration_asti0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=1, aberration_value=value)
 
-    def updateAberration_asti45(self, value):
+    def updateAberration_asti45(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=2, aberration_value=value)
 
-    def updateAberration_coma0(self, value):
+    def updateAberration_coma0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=3, aberration_value=value)
 
-    def updateAberration_coma90(self, value):
+    def updateAberration_coma90(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=4, aberration_value=value)
 
-    def updateAberration_spherical(self, value):
+    def updateAberration_spherical(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=5, aberration_value=value)
 
-    def updateAberration_trefoil0(self, value):
+    def updateAberration_trefoil0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=6, aberration_value=value)
 
-    def updateAberration_trefoil90(self, value):
+    def updateAberration_trefoil90(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=7, aberration_value=value)
 
-    def updateAberration_asti2_0(self, value):
+    def updateAberration_asti2_0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=8, aberration_value=value)
 
-    def updateAberration_asti2_45(self, value):
+    def updateAberration_asti2_45(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=9, aberration_value=value)
 
-    def updateAberration_coma2_0(self, value):
+    def updateAberration_coma2_0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=10, aberration_value=value)
 
-    def updateAberration_coma2_90(self, value):
+    def updateAberration_coma2_90(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=11, aberration_value=value)
 
-    def updateAberration_second_sph(self, value):
+    def updateAberration_second_sph(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=12, aberration_value=value)
 
-    def updateAberration_trefoil2_0(self, value):
+    def updateAberration_trefoil2_0(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=13, aberration_value=value)
 
-    def updateAberration_trefoil2_90(self, value):
+    def updateAberration_trefoil2_90(self, value: float) -> None:
         self.updateAberration_ext(aberration_index=14, aberration_value=value)
 
-    def _save_zernike_coefficients_json(self):
+    def _save_zernike_coefficients_json(self) -> None:
         """Save aberration line-edit values as JSON under ``Zernike_corrections/``."""
         os.makedirs(ZERNIKE_CORRECTIONS_DIR, exist_ok=True)
         default_path = os.path.join(ZERNIKE_CORRECTIONS_DIR, ZERNIKE_DEFAULT_COEFFS_JSON)
@@ -194,7 +201,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
                 self, "Invalid coefficient", "Enter numeric values in all aberration fields.\n" + str(e)
             )
             return
-        doc = {"format_version": 2}
+        doc: dict[str, float] = {"format_version": 2}
         for label, c in zip(self.gui.aberration_label_list, coeffs):
             doc[label] = c
         try:
@@ -208,7 +215,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Save error", str(e))
 
-    def _load_zernike_coefficients_from_path(self, path):
+    def _load_zernike_coefficients_from_path(self, path: str) -> None:
         """
         Load aberration coefficients from JSON.
 
@@ -257,7 +264,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
         self.updateAberration(aber_list=vals)
         print("Loaded Zernike coefficients from:", path)
 
-    def _load_zernike_coefficients_json(self):
+    def _load_zernike_coefficients_json(self) -> None:
         """Load coefficients from JSON via file dialog (default folder: ``Zernike_corrections/``)."""
         os.makedirs(ZERNIKE_CORRECTIONS_DIR, exist_ok=True)
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -267,7 +274,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
             return
         self._load_zernike_coefficients_from_path(path)
 
-    def _load_default_zernike_coefficients_json(self):
+    def _load_default_zernike_coefficients_json(self) -> None:
         """Load coefficients from the default JSON in ``Zernike_corrections/`` (no dialog)."""
         path = os.path.join(ZERNIKE_CORRECTIONS_DIR, ZERNIKE_DEFAULT_COEFFS_JSON)
         if not os.path.isfile(path):

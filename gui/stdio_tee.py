@@ -1,7 +1,11 @@
 """Stdout/stderr tee into a QPlainTextEdit."""
 
+from __future__ import annotations
+
+from typing import TextIO
+
 from PyQt5.QtCore import pyqtSignal
-from pyqtgraph.Qt import QtCore, QtGui
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 
 class StreamToPlainText(QtCore.QObject):
@@ -9,20 +13,22 @@ class StreamToPlainText(QtCore.QObject):
 
     _append = pyqtSignal(str)
 
-    def __init__(self, original_stream, plain_widget, parent=None):
+    def __init__(
+        self, original_stream: TextIO, plain_widget: QtWidgets.QPlainTextEdit, parent: QtCore.QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self._orig = original_stream
         self._plain = plain_widget
         self._append.connect(self._append_slot)
         self.encoding = getattr(original_stream, "encoding", None) or "utf-8"
 
-    def _append_slot(self, text):
+    def _append_slot(self, text: str) -> None:
         self._plain.moveCursor(QtGui.QTextCursor.End)
         self._plain.insertPlainText(text)
         sb = self._plain.verticalScrollBar()
         sb.setValue(sb.maximum())
 
-    def write(self, s):
+    def write(self, s: object) -> int:
         if not isinstance(s, str):
             s = str(s)
         try:
@@ -37,11 +43,11 @@ class StreamToPlainText(QtCore.QObject):
             self._append.emit(s)
         return len(s)
 
-    def flush(self):
+    def flush(self) -> None:
         try:
             self._orig.flush()
         except Exception:
             pass
 
-    def isatty(self):
+    def isatty(self) -> bool:
         return False

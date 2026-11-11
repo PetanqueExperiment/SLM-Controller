@@ -1,5 +1,6 @@
 """Shared GUI helpers."""
 
+import argparse
 import ast
 import os
 import re
@@ -11,7 +12,7 @@ from pyqtgraph.Qt import QtGui, QtWidgets
 from gui.constants import LOCAL_DIR, SH_CORRECTION_NPY
 
 
-def load_sh_correction_phase_file(ny, nx):
+def load_sh_correction_phase_file(ny: int, nx: int) -> np.ndarray:
     """Load optional SH phase map in radians; shape must match SLM. Otherwise return zeros."""
     out = np.zeros((ny, nx), dtype=np.float64)
     if not os.path.isfile(SH_CORRECTION_NPY):
@@ -28,7 +29,7 @@ def load_sh_correction_phase_file(ny, nx):
     return out
 
 
-def parse_pasted_coordinates(text):
+def parse_pasted_coordinates(text: str | None) -> np.ndarray:
     """
     Parse pasted trap coordinates into an (N, 2) or (N, 3) float array.
 
@@ -67,7 +68,7 @@ def parse_pasted_coordinates(text):
     return arr
 
 
-def framed_panel(inner_widget):
+def framed_panel(inner_widget: QtWidgets.QWidget) -> QtWidgets.QFrame:
     """Wrap a `pg.LayoutWidget` (or any QWidget) in a bordered frame so regions are visually distinct."""
     frame = QtWidgets.QFrame()
     frame.setObjectName("slm_panel_frame")
@@ -82,7 +83,7 @@ def framed_panel(inner_widget):
     return frame
 
 
-def register_windows_taskbar_app_id():
+def register_windows_taskbar_app_id() -> None:
     """Set AppUserModelID so the Windows taskbar uses our icon. Call before QApplication()."""
     if sys.platform == "win32":
         import ctypes
@@ -90,17 +91,15 @@ def register_windows_taskbar_app_id():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Petanque.SLMController.GUI.1")
 
 
-def application_icon(base_dir=None):
+def application_icon(base_dir: str | None = None) -> QtGui.QIcon:
     """Load the GUI icon. Requires QApplication (QIcon may use QPixmap internally)."""
     if base_dir is None:
         base_dir = LOCAL_DIR
     return QtGui.QIcon(os.path.join(base_dir, "Icon", "Petanque array.ico"))
 
 
-def parse_launch_args(argv=None):
+def parse_launch_args(argv: list[str] | None = None) -> argparse.Namespace:
     """CLI flags: offline testing without Meadowlark hardware, HERO options."""
-    import argparse
-
     parser = argparse.ArgumentParser(description="SLM Controller Petanque")
     parser.add_argument(
         "--simulate", action="store_true", help="Run without Blink SDK / SLM hardware (patterns stay in memory)."
