@@ -13,7 +13,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 
 from gui.constants import SLM_PATTERNS_DIR
 from gui.hologram_handler import readLegacyPattern, readTrapsDict
-from gui.operation_modes import DEFAULT_OPERATION_MODE, OPERATION_MODES, SLOT_START_STOP, SLOT_TIMINGS, DynamicMode, HologramSlot, OperationMode, StaticMode, ordinal
+from gui.panels.operation_mode import DEFAULT_OPERATION_MODE, OPERATION_MODES, SLOT_START_STOP, SLOT_TIMINGS, DynamicMode, HologramSlot, OperationMode, StaticMode, ordinal
 
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI
