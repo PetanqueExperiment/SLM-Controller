@@ -10,7 +10,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 
 import libslm.parameters as param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
-from gui.constants import PUPIL_VERTICAL_OFFSET, position_to_step_per_pixel
+from gui.constants import PUPIL_VERTICAL_OFFSET, positionToStepPerPixel
 from gpu_module_v7_3 import trap_phase_to_slm
 
 if TYPE_CHECKING:
@@ -39,22 +39,19 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.correctionLabel = QtWidgets.QLabel('CORRECTION')
         self.correctionLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.ManufacturerCorrectionChkBx = QtWidgets.QCheckBox('Manufacturer correction')
-        self.ManufacturerCorrectionChkBx.setChecked(True)
         self.zernikeCorrectionChkBx = QtWidgets.QCheckBox('Aberration control')
-        self.zernikeCorrectionChkBx.setChecked(True)
         self.pupilLabel = QtWidgets.QLabel('PUPIL')
         self.pupilLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.pupilChkBx = QtWidgets.QCheckBox('radius (mm):')
-        self.pupilChkBx.setChecked(False)
-        self.pupilEdt = MyQtLineEdit('1')
+        self.pupilEdt = MyQtLineEdit("")
         self.pupilEdt.setFixedWidth(100)
         self.pupilCenterLabel = QtWidgets.QLabel('PUPIL CENTER (mm)[x0, y0]:')
-        self.pupilCenterEdt_x0 = MyQtLineEdit(str(0))
-        self.pupilCenterEdt_y0 = MyQtLineEdit(str(0))
+        self.pupilCenterEdt_x0 = MyQtLineEdit("")
+        self.pupilCenterEdt_y0 = MyQtLineEdit("")
         self.pupilCenterEdt_x0.setFixedWidth(50)
         self.pupilCenterEdt_y0.setFixedWidth(50)
         self.pupilOutLabel = QtWidgets.QLabel('Move out')
-        self.pupilOutLineEdit = MyQtLineEdit('40')
+        self.pupilOutLineEdit = MyQtLineEdit("")
         self.pupilOutLineEdit.setFixedWidth(50)
         # self.pupilTypeCB = QtWidgets.QComboBox()
         # self.pupilTypeCB.addItems(['circular','square','rectangular','rectangular_rotated', 'rectangular_rotated_byAtom'])
@@ -167,12 +164,12 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
     def update_k_dump(self) -> None:
         d_out = float(self.gui.pupilOutLineEdit.text())
-        self.gui.k_dump = np.array([d_out, 0]) * 1e-6 * position_to_step_per_pixel
+        self.gui.k_dump = np.array([d_out, 0]) * 1e-6 * positionToStepPerPixel(self.gui.wavelength_m)
 
     def calculatePupil(self) -> None:
         d_out = float(self.gui.pupilOutLineEdit.text())
-        dphi_x = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
-        dphi_y = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
+        dphi_x = 2 * np.pi / self.gui.wavelength_m * param.M / param.f * d_out * 1e-6
+        dphi_y = 2 * np.pi / self.gui.wavelength_m * param.M / param.f * d_out * 1e-6
         self.gui.grating_out = self.gui.X * dphi_x + self.gui.Y * dphi_y
 
         pupil_x0 = float(self.gui.pupilCenterEdt_x0.text()) * 1e-3
@@ -336,7 +333,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
         X, Y = np.meshgrid(x, y)
         proj = np.cos(theta_rad) * Y + np.sin(theta_rad) * X
-        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (param.lamb * param.f / param.M))
+        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (self.gui.wavelength_m * param.f / param.M))
         phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
         phi_tem01 = phase_list[0, :, :]
 
@@ -366,7 +363,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
         X, Y = np.meshgrid(x, y)
         proj = np.cos(theta_rad) * Y + np.sin(theta_rad) * X
-        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (param.lamb * param.f / param.M))
+        amp_list = np.sin(-2 * np.pi * 0.5 * self.gui.spacing * 1e-6 * proj / (self.gui.wavelength_m * param.f / param.M))
         phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
         phi_tem01 = phase_list[0, :, :]
 

@@ -43,16 +43,16 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         # self.stepGratingEdit = MyQtLineEdit('1')
         # self.stepGratingEdit.setAlignment(QtCore.Qt.AlignCenter)
         self.positionLabel = QtWidgets.QLabel('Grating shift (in um)')
-        self.position_xEdt = MyQtLineEdit(str(self.gui.dx))
-        self.position_yEdt = MyQtLineEdit(str(self.gui.dy))
+        self.position_xEdt = MyQtLineEdit("")
+        self.position_yEdt = MyQtLineEdit("")
         # self.fresnelLabel = QtWidgets.QLabel('FRESNEL LENS')
         # self.fresnelLabel.setAlignment(QtCore.Qt.AlignCenter)
         # self.fresnelEpsilonLabel = QtWidgets.QLabel('Defocus')
         # self.fresnelEpsilonEdt = MyQtLineEdit('0')
         self.paramPLabel = QtWidgets.QLabel('P parameter')
-        self.paramPEdt = MyQtLineEdit(str(param.P))
+        self.paramPEdt = MyQtLineEdit("")
         self.paramWavelengthLabel = QtWidgets.QLabel('Wavelength (nm)')
-        self.paramWavelengthEdit = MyQtLineEdit('%.0f' % (param.lamb * 1e9))
+        self.paramWavelengthEdit = MyQtLineEdit("")
 
         self.w6.addWidget(self.label_w6, row=0, colspan=4)
         self.w6.addWidget(self.positionLabel, row=1, col=0)
@@ -147,8 +147,19 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.gui.updatePhase()
 
     def updateParamWavelength(self) -> None:
-        param.lamb = float(self.paramWavelengthEdit.text()) * 1e-9
-        position_to_step_per_pixel = 2 * np.pi / param.lamb * (param.M / param.f) * param.pslm
+        '''Updates the laser wavelength when a return is pressed in the field (recomputes every wavelength-dependent term)'''
+        current = self.gui._formatNumber(self.gui.wavelength_m * 1e9)
+        try:
+            wavelength_nm = float(self.paramWavelengthEdit.text())
+        except ValueError:
+            print(f"Wavelength: {self.paramWavelengthEdit.text()!r} is not a number; keeping {current} nm")
+            self.paramWavelengthEdit.setText(current)
+            return
+        if wavelength_nm <= 0:
+            print(f"Wavelength must be positive, got {wavelength_nm} nm; keeping {current} nm")
+            self.paramWavelengthEdit.setText(current)
+            return
+        self.gui.setWavelength(wavelength_nm / 1e9)
 
     def createGratingPattern(self, dx: float, dy: float) -> None:
         '''
@@ -170,8 +181,8 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self._set_float_line_edit(self.position_xEdt, dx)
         self._set_float_line_edit(self.position_yEdt, dy)
 
-        dphi_x = 2 * np.pi / param.lamb * param.M / param.f * dx * 1e-6
-        dphi_y = 2 * np.pi / param.lamb * param.M / param.f * dy * 1e-6
+        dphi_x = 2 * np.pi / self.gui.wavelength_m * param.M / param.f * dx * 1e-6
+        dphi_y = 2 * np.pi / self.gui.wavelength_m * param.M / param.f * dy * 1e-6
 
         self.gui.im_grating = self.gui.X * dphi_x + self.gui.Y * dphi_y
         self.gui.updatePhase()
@@ -186,6 +197,6 @@ class ElementaryControlPanel(QtWidgets.QWidget):
             self._set_float_line_edit(self.fresnelEpsilonEdt, dz)
 
         self.gui.fresnelPhase = (
-            np.pi / param.lamb * (param.M / param.f) ** 2 * dz * 1e-6 * (self.gui.X**2 + self.gui.Y**2)
+            np.pi / self.gui.wavelength_m * (param.M / param.f) ** 2 * dz * 1e-6 * (self.gui.X**2 + self.gui.Y**2)
         )
         self.gui.updatePhase()

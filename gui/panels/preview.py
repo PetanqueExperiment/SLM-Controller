@@ -236,9 +236,9 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         arr = np.asarray(hologram_u8)
         if arr.ndim != 2:
             return None
-        p = float(getattr(self.gui, "param_P", 255) or 255)
+        p = float(self.gui.param_P)
         if p <= 0:
-            p = 255.0
+            return None
         phase = arr.astype(np.float64) * (2.0 * np.pi / p)
         field = np.exp(1j * phase)
         ft = np.fft.fftshift(np.fft.fft2(field))

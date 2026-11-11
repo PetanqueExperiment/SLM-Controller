@@ -1,0 +1,36 @@
+{
+  "grating": {
+    "x_um": 0,
+    "y_um": 0,
+    "phase_levels": 255,
+    "wavelength_nm": 850
+  },
+  "corrections": {
+    "manufacturer": true,
+    "aberration": true
+  },
+  "pupil": {
+    "enabled": false,
+    "radius_mm": "1",
+    "x0_mm": 0,
+    "y0_mm": 0,
+    "move_out_um": 40
+  },
+  "aberration": {
+    "defocus": 0,
+    "asti 0": 0,
+    "asti 45": 0,
+    "coma 0": 0,
+    "coma 90": 0,
+    "primary spherical": 0,
+    "trefoil 0": 0,
+    "trefoil 90": 0,
+    "asti 2nd 0": 0,
+    "asti 2nd 45": 0,
+    "coma 2nd 0": 0,
+    "coma 2nd 90": 0,
+    "2nd spherical": 0,
+    "trefoil 2nd 0": 0,
+    "trefoil 2nd 90": 0
+  }
+}

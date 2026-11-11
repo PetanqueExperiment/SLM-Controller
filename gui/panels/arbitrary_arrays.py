@@ -29,8 +29,8 @@ from gui.constants import (
     SLM_PATTERNS_DIR,
     SYSTEM_MAGNIFICATION,
     TWEEZER_ROIS_DIR,
-    position_to_step_per_pixel,
-    position_to_step_per_pixel_for_z,
+    positionToStepPerPixel,
+    positionToStepPerPixelForZ,
 )
 from gui.helpers import parse_pasted_coordinates
 from tweezer_array import coords_npy_to_traps_pos, rectangular_lattice_coords
@@ -485,8 +485,8 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.N_traps = int(self.gui.traps_pos.shape[0])
         print('Traps = ', self.gui.N_traps)
         self.gui.traps_k = np.copy(self.gui.traps_pos[:, 1:4])
-        self.gui.traps_k[:, 0:2] *= position_to_step_per_pixel
-        self.gui.traps_k[:, 2] *= position_to_step_per_pixel_for_z
+        self.gui.traps_k[:, 0:2] *= positionToStepPerPixel(self.gui.wavelength_m)
+        self.gui.traps_k[:, 2] *= positionToStepPerPixelForZ(self.gui.wavelength_m)
 
         self.gui.theta_traps = np.random.rand(self.gui.N_traps) * 2 * np.pi
         self.gui.weight_traps = np.ones(self.gui.N_traps)

@@ -14,9 +14,8 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError
-from gui.constants import position_to_step_per_pixel
-from gui.defaults import DEVICES_FILE, STARTUP_MODES
-from gui.settings import AppSettings, Device, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, parseBoard, readProfile, setDeviceSerial, writeProfile
+from gui.defaults import DEFAULT_PROFILE, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
+from gui.settings import PROFILE_LOADED, PROFILE_MISSING, AppSettings, Device, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, readProfile, restoreDefaultProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -68,7 +67,8 @@ class SLMGUI(QtWidgets.QMainWindow):
     SLM: Optional[MeadowlarkSLM]  # None when no SLM is connected
     board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
-    param_P: int  # gray levels per 2π (from SLM parameters)
+    param_P: float  # gray levels per 2π (profile: grating.phase_levels)
+    wavelength_m: float  # laser wavelength [m] (profile: grating.wavelength_nm); converts µm in the focal plane to SLM phase
 
     # --- Remote control / state saving ---
     _remote_control: dict[str, Callable[..., Any]]
@@ -156,6 +156,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     # --- Settings / profiles ---
     settings: AppSettings  # settings/settings.json
     current_profile: str  # name of the active profile (profiles/<name>.json)
+    _suspend_phase_updates: bool  # True while a profile is applied: updatePhase() waits until all values are set
 
     # --- Aliases of panel widgets ---
     _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
@@ -217,12 +218,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.current_profile = self.settings.startupProfile()
         self.board = None
         self.SLM = None
+        self._suspend_phase_updates = False
 
         self.initUI()
         self.initPhase()
         self.loadProfile(self.current_profile)
         self._updateWindowTitle()
-        self.elementary.createGratingPattern(self.dx, self.dy)
 
         self._last_sent_plot.installEventFilter(self._preview)
         self._preview.ft_plot.installEventFilter(self._preview)
@@ -405,7 +406,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.deltax = 1
         self.deltay = 1
         self._epsilon = 0
-        self.param_P = param.P
 
         self.phasePattern = np.zeros([param.ImgResY, param.ImgResX])
         self.im_grating = np.zeros([param.ImgResY, param.ImgResX])
@@ -426,9 +426,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.zernike_polynomials *= 2 * np.pi
 
     def initUI(self) -> None:
-        self.dx = 0
-        self.dy = 0
-
         # Tip/tilt (Zernike indices 0–1) omitted from the UI.
         # Poly indices skip tetrafoil (15–16) so trefoil 2nd maps to Z19/Z20.
         self.aberration_label_list = [
@@ -453,7 +450,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         # First N labels go in the left column; the rest are 2nd-order (right column).
         self.aberration_n_primary = 8
         self.aberration_poly_offset = 2  # fallback if poly_indices missing
-        self.aberration_values = np.zeros(len(self.aberration_label_list))
 
         self.N_traps = 30
         self.traps_dict = {}
@@ -461,7 +457,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.traps_k = [[]]
         self.theta_traps = []
         self._weigth_traps = []
-        self.k_dump = np.array([40, 0]) * 1e-6 * position_to_step_per_pixel
 
         self.spacing = 5.0
         self.theta_deg = -4.0
@@ -640,25 +635,105 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         print(f"Startup profile: {STARTUP_MODES[self.settings.startup_mode]}")
 
+    @staticmethod
+    def _formatNumber(value: float) -> str:
+        """Profile number as line-edit text: whole numbers without decimals (40, not 40.0)."""
+        value = float(value)
+        return str(int(value)) if value.is_integer() else repr(value)
+
     def profileParams(self) -> dict[str, Any]:
-        """Parameters stored in a profile file."""
-        return {} if self.board is None else {"board": self.board}
+        """Current values of everything stored in a profile (same layout as profile_templates/default.json)."""
+        params: dict[str, Any] = {} if self.board is None else {"board": self.board}
+        params["grating"] = {"x_um": float(self.dx), "y_um": float(self.dy), "phase_levels": self.param_P, "wavelength_nm": round(self.wavelength_m * 1e9, 6)}
+        params["corrections"] = {"manufacturer": self._ManufacturerCorrectionChkBx.isChecked(), "aberration": self._zernikeCorrectionChkBx.isChecked()}
+        pupil: dict[str, Any] = {"enabled": self._pupilChkBx.isChecked(), "radius_mm": self.pupilEdt.text().strip()}
+        for key, edit in (("x0_mm", self.pupilCenterEdt_x0), ("y0_mm", self.pupilCenterEdt_y0), ("move_out_um", self.pupilOutLineEdit)):
+            try:
+                pupil[key] = float(edit.text())
+            except ValueError:
+                print(f"Profile: pupil {key} = {edit.text()!r} is not a number and is not saved")
+        params["pupil"] = pupil
+        params["aberration"] = {label: float(v) for label, v in zip(self.aberration_label_list, self.aberration_values)}
+        return params
 
     def applyProfile(self, params: dict[str, Any]) -> None:
-        """Apply parameters read from a profile file."""
-        self.board = parseBoard(params.get("board"))
-        if "board" in params and self.board is None:
+        """Set the GUI from full profile parameters (template merged with a profile file); the hologram is updated once at the end."""
+        board = parseBoard(params.get("board"))
+        if "board" in params and board is None:
             print(f"Ignoring invalid board {params['board']!r} in profile {self.current_profile!r}")
+        self.board = board
+        grating, corrections, pupil, aberration = params["grating"], params["corrections"], params["pupil"], params["aberration"]
+        missing = [label for label in self.aberration_label_list if label not in aberration]
+        if missing:
+            raise ValueError(f"Profile has no value for aberration(s) {missing}: check {PROFILE_TEMPLATE_FILE}")
+        self._suspend_phase_updates = True
+        try:
+            self.param_P = grating["phase_levels"]
+            self.elementary.paramPEdt.setText(self._formatNumber(grating["phase_levels"]))
+            self.wavelength_m = grating["wavelength_nm"] / 1e9
+            self.elementary.paramWavelengthEdit.setText(self._formatNumber(grating["wavelength_nm"]))
+            for box, checked in ((self._ManufacturerCorrectionChkBx, corrections["manufacturer"]), (self._zernikeCorrectionChkBx, corrections["aberration"]), (self._pupilChkBx, pupil["enabled"])):
+                box.blockSignals(True)
+                box.setChecked(checked)
+                box.blockSignals(False)
+            self.pupilEdt.setText(pupil["radius_mm"])
+            self.pupilCenterEdt_x0.setText(self._formatNumber(pupil["x0_mm"]))
+            self.pupilCenterEdt_y0.setText(self._formatNumber(pupil["y0_mm"]))
+            self.pupilOutLineEdit.setText(self._formatNumber(pupil["move_out_um"]))
+            self._advanced.update_k_dump()
+            self.aberration_values = np.zeros(len(self.aberration_label_list))
+            self.aberration.updateAberration(aber_list=[aberration[label] for label in self.aberration_label_list])
+            for edit, label in zip(self.aber_lineEdit_list, self.aberration_label_list):
+                edit.setText(self._formatNumber(aberration[label]))
+            self.dx, self.dy = grating["x_um"], grating["y_um"]
+            self.elementary.createGratingPattern(self.dx, self.dy)
+            if pupil["enabled"]:
+                self._advanced.calculatePupil()
+        finally:
+            self._suspend_phase_updates = False
+        self.updatePhase()
+
+    def setWavelength(self, wavelength_m: float) -> None:
+        """Change the laser wavelength: recompute every λ-dependent term, then send one consistent frame.
+
+        λ converts µm in the focal plane into phase on the SLM (∝ 1/λ): grating shift, pupil "move out" grating and
+        k_dump follow at once. The trap hologram (phasePattern) is only rebuilt by Run Algorithm / Load Hologram,
+        so a warning is shown when one is in use.
+        """
+        old_m = self.wavelength_m
+        if wavelength_m == old_m:
+            return
+        self.wavelength_m = wavelength_m
+        self.elementary.paramWavelengthEdit.setText(self._formatNumber(wavelength_m * 1e9))
+        self._suspend_phase_updates = True
+        try:
+            self._advanced.update_k_dump()
+            self.elementary.createGratingPattern(self.dx, self.dy)
+            if self._pupilChkBx.isChecked():
+                self._advanced.calculatePupil()
+        finally:
+            self._suspend_phase_updates = False
+        self.updatePhase()
+        print(f"Wavelength changed: {old_m * 1e9:g} nm -> {wavelength_m * 1e9:g} nm (grating, pupil and k_dump recomputed)")
+        if np.any(self.phasePattern):
+            text = f"The wavelength changed from {old_m * 1e9:g} nm to {wavelength_m * 1e9:g} nm.\n\nThe grating and pupil now use the new wavelength, but the trap hologram on the SLM was computed for {old_m * 1e9:g} nm: with a {wavelength_m * 1e9:g} nm laser its traps land at {wavelength_m / old_m:.3f}× the intended distances.\n\nPress Run Algorithm (or reload the hologram) to recompute it."
+            QtWidgets.QMessageBox.warning(self, "Wavelength changed", text)
 
     def loadProfile(self, name: str) -> None:
-        """Load ``profiles/<name>.json`` (if it exists) and make it the active profile."""
+        """Make ``name`` the active profile: repository defaults overridden by ``profiles/<name>.json`` (if it exists)."""
         self.current_profile = name
-        params = readProfile(name)
-        if params is None:
-            print(f"Profile {name!r}: no saved file yet, using defaults")
-            return
+        try:
+            params, state = loadProfileParams(name)
+        except ProfileTemplateError as e:
+            QtWidgets.QMessageBox.critical(self, "Default profile missing", f"{e}\n\nThe SLM Controller needs this file from the repository to start.")
+            raise
+        if state == PROFILE_LOADED:
+            print(f"Loaded profile {name!r}")
+        elif state == PROFILE_MISSING:
+            print(f"Profile {name!r}: no saved file yet, using the default values")
+        else:
+            print(f"Profile {name!r} could not be read: using the default values (Profiles ▸ Restore default profile repairs 'default')")
         self.applyProfile(params)
-        print(f"Loaded profile {name!r}")
 
     def saveProfile(self, name: Optional[str] = None) -> Path:
         """Write ``profileParams()`` to ``profiles/<name>.json`` (default: active profile) and return the path."""
@@ -670,7 +745,32 @@ class SLMGUI(QtWidgets.QMainWindow):
         menu.addAction("Load…").triggered.connect(lambda _checked=False: self._loadProfileDialog())
         menu.addAction("Save").triggered.connect(lambda _checked=False: self._saveProfileClicked())
         menu.addAction("Duplicate…").triggered.connect(lambda _checked=False: self._duplicateProfileDialog())
+        menu.addSeparator()
+        menu.addAction("Restore default profile").triggered.connect(lambda _checked=False: self._restoreDefaultProfileClicked())
         return menu
+
+    def _restoreDefaultProfileClicked(self) -> None:
+        """Profiles ▸ Restore default profile: overwrite profiles/default.json with the repository template."""
+        target = profilePath(DEFAULT_PROFILE)
+        active = self.current_profile == DEFAULT_PROFILE
+        text = f"Overwrite\n{target}\nwith the default values from the repository\n{PROFILE_TEMPLATE_FILE}?"
+        if active:
+            text += f"\n\n'{DEFAULT_PROFILE}' is the active profile: the default values are applied now."
+        if QtWidgets.QMessageBox.question(self, "Restore default profile", text) != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            path = restoreDefaultProfile()
+        except (OSError, ProfileTemplateError) as e:
+            print("Could not restore the default profile:", e)
+            QtWidgets.QMessageBox.warning(self, "Restore default profile", f"Could not restore the default profile:\n{e}")
+            return
+        print(f"Restored the default profile: {path}")
+        if active:
+            connected_board = self.board if self.isSLMConnected() else None
+            self.applyProfile(loadProfileParams(DEFAULT_PROFILE)[0])
+            if connected_board is not None:
+                self.board = connected_board
+            self._updateWindowTitle()
 
     def _chooseProfile(self, title: str, label: str) -> Optional[str]:
         """Pick a profile name from profiles/ (the active one is always listed and preselected)."""
@@ -692,9 +792,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         name = self._chooseProfile("Load profile", "Profile to load:")
         if name is None:
             return
-        params = readProfile(name)
-        if params is None:
-            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} has no saved file yet.")
+        params, state = loadProfileParams(name)
+        if state != PROFILE_LOADED:
+            reason = "has no saved file yet" if state == PROFILE_MISSING else "could not be read (damaged file)"
+            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} {reason}.")
             return
         board = parseBoard(params.get("board"))
         connected = self.isSLMConnected()
@@ -862,6 +963,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         return converted_array
 
     def updatePhase(self) -> None:
+        if self._suspend_phase_updates:
+            return
         self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
 
         if self._ManufacturerCorrectionChkBx.isChecked() and self.SLM is not None:

@@ -104,3 +104,50 @@ def test_app_settings_unknown_mode_falls_back(tmp_path):
     s = AppSettings.load(path)
     assert s.startup_mode == "last_used"
     assert s.last_profile == "p"
+
+
+ABERRATION_LABELS = ["defocus", "asti 0", "asti 45", "coma 0", "coma 90", "primary spherical", "trefoil 0", "trefoil 90", "asti 2nd 0", "asti 2nd 45", "coma 2nd 0", "coma 2nd 90", "2nd spherical", "trefoil 2nd 0", "trefoil 2nd 90"]
+
+
+def test_repository_template_is_complete():
+    t = settings.loadProfileTemplate()
+    assert set(t) == {"grating", "corrections", "pupil", "aberration"}
+    assert set(t["grating"]) == {"x_um", "y_um", "phase_levels", "wavelength_nm"}
+    assert set(t["corrections"]) == {"manufacturer", "aberration"} and all(isinstance(v, bool) for v in t["corrections"].values())
+    assert set(t["pupil"]) == {"enabled", "radius_mm", "x0_mm", "y0_mm", "move_out_um"} and isinstance(t["pupil"]["radius_mm"], str)
+    assert list(t["aberration"]) == ABERRATION_LABELS
+    assert "board" not in t
+
+
+def test_merge_profile_overrides_keeps_extra_and_rejects_wrong_types():
+    template = {"grating": {"x_um": 0, "wavelength_nm": 850}, "corrections": {"manufacturer": True}, "pupil": {"radius_mm": "1"}}
+    profile = {"board": 2, "grating": {"x_um": 3.5, "wavelength_nm": "fast"}, "corrections": {"manufacturer": 1}, "pupil": "oops"}
+    merged = settings.mergeProfile(template, profile)
+    assert merged == {"board": 2, "grating": {"x_um": 3.5, "wavelength_nm": 850}, "corrections": {"manufacturer": True}, "pupil": {"radius_mm": "1"}}
+    assert template["grating"]["x_um"] == 0
+
+
+def test_load_profile_params_old_file_gets_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "PROFILE_DIR", tmp_path / "profiles")
+    settings.writeProfile("default", {"board": 1})
+    params, state = settings.loadProfileParams("default")
+    assert state == settings.PROFILE_LOADED and params["board"] == 1 and params["pupil"]["move_out_um"] == 40
+    params, state = settings.loadProfileParams("missing")
+    assert state == settings.PROFILE_MISSING and "board" not in params and params["grating"]["phase_levels"] == 255
+    settings.profilePath("damaged").write_text("{ broken", encoding="utf-8")
+    params, state = settings.loadProfileParams("damaged")
+    assert state == settings.PROFILE_UNREADABLE and params == settings.loadProfileTemplate()
+
+
+def test_missing_template_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "PROFILE_TEMPLATE_FILE", tmp_path / "nope.json")
+    with pytest.raises(settings.ProfileTemplateError):
+        settings.loadProfileParams("default")
+
+
+def test_restore_default_profile_copies_template(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "PROFILE_DIR", tmp_path / "profiles")
+    settings.writeProfile("default", {"grating": {"x_um": 99}, "broken": True})
+    path = settings.restoreDefaultProfile()
+    assert path == tmp_path / "profiles" / "default.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == settings.loadProfileTemplate()

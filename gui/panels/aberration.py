@@ -50,7 +50,7 @@ class AberrationControlPanel(QtWidgets.QWidget):
 
         def _add_aber_field(name: str, row: int, label_col: int, edit_col: int) -> None:
             label = QtWidgets.QLabel(name)
-            lineEdit = MyQtLineEdit("0")
+            lineEdit = MyQtLineEdit("")
             lineEdit.setFixedWidth(50)
             self.Abberation_control_layout.addWidget(label, row=row, col=label_col)
             self.Abberation_control_layout.addWidget(lineEdit, row=row, col=edit_col)

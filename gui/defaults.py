@@ -16,6 +16,10 @@ DEVICES_FILE: Path = DEVICES_DIR / 'devices.json'
 
 DEFAULT_PROFILE: str = 'default'
 
+# Default values of the GUI, tracked in the repository: profiles/<name>.json only override them.
+PROFILE_TEMPLATE_DIR: Path = Path(__file__).resolve().parent.parent / 'profile_templates'
+PROFILE_TEMPLATE_FILE: Path = PROFILE_TEMPLATE_DIR / 'default.json'
+
 STARTUP_LAST_USED: str = 'last_used'
 STARTUP_MODES: dict[str, str] = {STARTUP_LAST_USED: 'Last used'}
 DEFAULT_STARTUP_MODE: str = STARTUP_LAST_USED

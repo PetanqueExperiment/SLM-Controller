@@ -257,9 +257,22 @@ def slm_to_trap_amp(phi, k_list, device=DEVICE):
 # =============================================================================
 # Test functions
 # =============================================================================
-def test_GPU_vs_CPU(L = 5):
+def _test_wavelength_m(wavelength_m=None):
+    """Wavelength [m] for the test functions: the argument, else wavelength_nm of the profile the GUI would start with."""
+    if wavelength_m is not None:
+        return float(wavelength_m)
+    from gui.settings import AppSettings, loadProfileParams
+    name = AppSettings.load().startupProfile()
+    params, _ = loadProfileParams(name)
+    wavelength_nm = params["grating"]["wavelength_nm"]
+    print(f"Test wavelength from profile {name!r}: {wavelength_nm} nm")
+    return wavelength_nm / 1e9
+
+
+def test_GPU_vs_CPU(L = 5, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import parameters_SLM_ultimate as param 
+    import libslm.parameters as param
+    wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
     # Parameters
@@ -268,7 +281,7 @@ def test_GPU_vs_CPU(L = 5):
     Ny = param.ImgResY
     SLM_shape = (Ny,Nx)
                 
-    micron_to_step_per_pixel = 2*np.pi/param.lamb*(param.M/param.f)*param.pslm
+    micron_to_step_per_pixel = 2*np.pi/wavelength_m*(param.M/param.f)*param.pslm
     
     #Load traps and convert to micrometer
 #    LOCAL_DIR = 'G:\\Shared drives\\3G_Common\\Software\\SLM_python'
@@ -378,9 +391,10 @@ def test_GPU_vs_CPU(L = 5):
 #    return T_sum,T_reduce
 
 
-def test_GPU(L = 5, device = DEVICE):
+def test_GPU(L = 5, device = DEVICE, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import parameters_SLM_ultimate as param 
+    import libslm.parameters as param
+    wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
     # Parameters
@@ -389,7 +403,7 @@ def test_GPU(L = 5, device = DEVICE):
     Ny = param.ImgResY
     SLM_shape = (Ny,Nx)
                 
-    micron_to_step_per_pixel = 2*np.pi/param.lamb*(param.M/param.f)*param.pslm
+    micron_to_step_per_pixel = 2*np.pi/wavelength_m*(param.M/param.f)*param.pslm
     
     N_traps = L**2
     spacing = 5e-6
@@ -428,9 +442,10 @@ def test_GPU(L = 5, device = DEVICE):
 
 
 
-def test_GPU_pupil(L = 5):
+def test_GPU_pupil(L = 5, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import parameters_SLM_ultimate as param 
+    import libslm.parameters as param
+    wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
     # Parameters
@@ -439,7 +454,7 @@ def test_GPU_pupil(L = 5):
     Ny = param.ImgResY
     SLM_shape = (Ny,Nx)
                 
-    micron_to_step_per_pixel = 2*np.pi/param.lamb*(param.M/param.f)*param.pslm
+    micron_to_step_per_pixel = 2*np.pi/wavelength_m*(param.M/param.f)*param.pslm
     
     N_traps = L**2
     spacing = 5e-6
@@ -493,10 +508,11 @@ def test_GPU_pupil(L = 5):
     return T_sum,T_reduce
 # test_GPU_pupil()
 
-def test_CPU(L = 5):
+def test_CPU(L = 5, wavelength_m = None):
     
     import matplotlib.pyplot as plt
-    import parameters_SLM_ultimate as param 
+    import libslm.parameters as param
+    wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
     # Parameters
@@ -505,7 +521,7 @@ def test_CPU(L = 5):
     Ny = param.ImgResY
     SLM_shape = (Ny,Nx)
                 
-    micron_to_step_per_pixel = 2*np.pi/param.lamb*(param.M/param.f)*param.pslm
+    micron_to_step_per_pixel = 2*np.pi/wavelength_m*(param.M/param.f)*param.pslm
     
   
     N_traps = L**2

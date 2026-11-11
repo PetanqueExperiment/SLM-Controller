@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
+import shutil
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from gui.defaults import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_FILE, PROFILE_DIR, SETTINGS_FILE
+from gui.defaults import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
 from gui.defaults import STARTUP_LAST_USED, STARTUP_MODES
 
 
@@ -78,6 +80,73 @@ def readProfile(name: str) -> dict[str, Any] | None:
 def writeProfile(name: str, params: dict[str, Any]) -> Path:
     path = profilePath(name)
     _write_json(path, params)
+    return path
+
+
+class ProfileTemplateError(RuntimeError):
+    """The default profile template in the repository (profile_templates/default.json) is missing or invalid."""
+
+
+def loadProfileTemplate() -> dict[str, Any]:
+    """Default values of every profile parameter, from the repository template."""
+    template = _read_json(PROFILE_TEMPLATE_FILE)
+    if template is None:
+        raise ProfileTemplateError(f"Default profile template missing or invalid: {PROFILE_TEMPLATE_FILE}")
+    return template
+
+
+def _sameKind(default: Any, value: Any) -> bool:
+    """True if ``value`` can replace ``default``: bool for bool, number for number (not bool), str for str."""
+    if isinstance(default, bool) or isinstance(value, bool):
+        return isinstance(default, bool) and isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return isinstance(value, (int, float))
+    return isinstance(value, type(default))
+
+
+def mergeProfile(template: dict[str, Any], profile: dict[str, Any], where: str = "") -> dict[str, Any]:
+    """Template values overridden by ``profile``; keys only in the profile (e.g. ``board``) are kept, wrong types ignored."""
+    merged = copy.deepcopy(template)
+    for key, value in profile.items():
+        name = f"{where}{key}"
+        if key not in template:
+            merged[key] = value
+        elif isinstance(template[key], dict):
+            if isinstance(value, dict):
+                merged[key] = mergeProfile(template[key], value, f"{name}.")
+            else:
+                print(f"Profile: ignoring {name} = {value!r} (expected a section)")
+        elif _sameKind(template[key], value):
+            merged[key] = value
+        else:
+            print(f"Profile: ignoring {name} = {value!r} (expected {type(template[key]).__name__}); using default {template[key]!r}")
+    return merged
+
+
+PROFILE_LOADED: str = "loaded"
+PROFILE_MISSING: str = "missing"
+PROFILE_UNREADABLE: str = "unreadable"
+
+
+def loadProfileParams(name: str) -> tuple[dict[str, Any], str]:
+    """Full parameters of profile ``name``: the repository template overridden by ``profiles/<name>.json``.
+
+    Returns the parameters and the state of the file: PROFILE_LOADED, PROFILE_MISSING or PROFILE_UNREADABLE
+    (exists but is not a valid JSON object; the defaults are used).
+    """
+    template = loadProfileTemplate()
+    profile = readProfile(name)
+    if profile is not None:
+        return mergeProfile(template, profile), PROFILE_LOADED
+    return template, PROFILE_UNREADABLE if profilePath(name).exists() else PROFILE_MISSING
+
+
+def restoreDefaultProfile() -> Path:
+    """Overwrite ``profiles/default.json`` with the repository template; return the written path."""
+    loadProfileTemplate()
+    path = profilePath(DEFAULT_PROFILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(PROFILE_TEMPLATE_FILE, path)
     return path
 
 
