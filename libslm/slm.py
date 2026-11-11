@@ -3,7 +3,7 @@
 Requires Meadowlark Blink / PCIe install or USB SDK: Blink_C_wrapper.dll and your *.lut file.
 See PCIe User Manual §4 (Create_SDK, Load_LUT_file, Write_image, ImageWriteComplete, Delete_SDK).
 
-Usage for live GUI: call :func:`connect` once when opening the device, then :func:`upload_image_to_slm`
+Usage for live GUI: call :func:`connect` once when opening the device, then :func:`uploadHologram`
 for each frame, and :func:`disconnect` when shutting down. Per-frame work is only Write_image +
 ImageWriteComplete; Create_SDK / Load_LUT / Delete_SDK run once per session.
 
@@ -42,7 +42,7 @@ _simulate: bool = False
 _last_image: np.ndarray | None = None
 
 
-def is_simulated() -> bool:
+def isSimulated() -> bool:
     """True when the current session is the offline stub (no real SLM writes)."""
     return _simulate and _sdk_connected
 
@@ -170,7 +170,7 @@ def disconnect() -> None:
         _sdk_connected = False
 
 
-def read_temperature(board: int = BOARD) -> float:
+def readTemperature(board: int = BOARD) -> float:
     """Return the SLM temperature in degrees Celsius. Requires :func:`connect` first."""
     if not _sdk_connected:
         raise RuntimeError("Meadowlark SDK not connected. Call libslm.slm.connect() before reading temperature.")
@@ -181,10 +181,10 @@ def read_temperature(board: int = BOARD) -> float:
     return float(_blink_dll.Read_SLM_temperature(board))
 
 
-def upload_image_to_slm(image_u8: np.ndarray) -> None:
+def uploadHologram(image_u8: np.ndarray) -> None:
     """Send a single 1024×1024 uint8 frame to the SLM (blocking). Requires :func:`connect` first.
 
-    In simulate mode the frame is stored in memory (see :func:`get_last_image`) and not sent
+    In simulate mode the frame is stored in memory (see :func:`getLastHologram`) and not sent
     to hardware.
     """
     global _blink_dll, _sdk_connected, _last_image
@@ -216,7 +216,7 @@ def upload_image_to_slm(image_u8: np.ndarray) -> None:
         raise RuntimeError(f"ImageWriteComplete returned {rc}")
 
 
-def get_last_image() -> np.ndarray | None:
+def getLastHologram() -> np.ndarray | None:
     """Return a copy of the last simulated upload, or None if none / not in simulate mode."""
     if _last_image is None:
         return None

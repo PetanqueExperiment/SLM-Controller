@@ -93,7 +93,7 @@ Defer full GPU `slm_to_trap_amp` rewrite unless precompute+equalize is too slow;
 
 - Add `updatePhase(preview=False)` / `upload_phase_pattern(phi)` that skips FT preview and GUI pumps during playback
 - Pre-bake static corrections (manufacturer WFC + Zernike + global grating) into one additive map applied once per frame (or once into uint8 conversion)
-- Worker thread: push frames → [`libslm/slm.py`](../libslm/slm.py) `upload_image_to_slm` paced with `QTimer`/`time.sleep` to measured interval; keep GUI responsive
+- Worker thread: push frames → [`libslm/slm.py`](../libslm/slm.py) `uploadHologram` paced with `QTimer`/`time.sleep` to measured interval; keep GUI responsive
 
 Do not bind OverDrive sequence APIs until single-frame paced writes are proven.
 

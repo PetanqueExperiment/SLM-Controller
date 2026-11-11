@@ -183,7 +183,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             self.label_slm_temperature.setText("SLM temperature: —")
             return
         try:
-            temp_c = comm.read_temperature()
+            temp_c = comm.readTemperature()
         except Exception:
             self.label_slm_temperature.setText("SLM temperature: unavailable")
             return

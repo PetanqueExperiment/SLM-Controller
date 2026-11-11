@@ -48,7 +48,7 @@ def main():
     except Exception as e:
         print(f"\nFAILED to connect: {type(e).__name__}: {e}")
         return 1
-    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if comm.is_simulated() else ''}")
+    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if comm.isSimulated() else ''}")
 
     all_ok = True
     try:
@@ -67,12 +67,12 @@ def main():
             print(f"  {'pixel pitch':<14} device={pitch!s:<10} config={param.pslm * 1e6:g} um")
             print(f"  {'serial number':<14} {serial}")
 
-        print(f"\nTemperature: {comm.read_temperature():.2f} C")
+        print(f"\nTemperature: {comm.readTemperature():.2f} C")
 
         if args.write_blank:
             frame = np.zeros((comm.H, comm.W), dtype=np.uint8)
             t0 = time.perf_counter()
-            comm.upload_image_to_slm(frame)
+            comm.uploadHologram(frame)
             print(f"Blank frame written in {(time.perf_counter() - t0) * 1e3:.1f} ms")
     except Exception as e:
         print(f"\nFAILED during test: {type(e).__name__}: {e}")

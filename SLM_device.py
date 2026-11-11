@@ -41,7 +41,7 @@ class SLMDevice:
             self.parameters = parameters
             self.communication = communication
             communication.connect(simulate=self.simulated)
-            self.updateArray = communication.upload_image_to_slm
+            self.updateArray = communication.uploadHologram
 
         else:
             raise ValueError(f"SLM name {name} not supported")
