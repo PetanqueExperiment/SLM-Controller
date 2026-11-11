@@ -22,7 +22,7 @@ class SLMDevice:
         if name == "Meadowlark SLM":
 
             import libslm.parameters as parameters
-            import libslm.slm as communication
+            from libslm.slm import MeadowlarkSLM
 
             _wfc = Path(__file__).resolve().parent / "libslm" / "slm6801_at785_33C_WFC.bmp"
             print("Manufacturer wfc path: ", _wfc)
@@ -39,9 +39,9 @@ class SLMDevice:
                 )
 
             self.parameters = parameters
-            self.communication = communication
-            communication.connect(simulate=self.simulated)
-            self.updateArray = communication.uploadHologram
+            self.communication = MeadowlarkSLM(simulate=self.simulated)
+            self.communication.connect()
+            self.updateArray = self.communication.uploadHologram
 
         else:
             raise ValueError(f"SLM name {name} not supported")
@@ -56,7 +56,5 @@ class SLMDevice:
     def close(self):
         print("Closing SLM device")
         if self.name == "Meadowlark SLM":
-            import libslm.slm as communication
-
-            communication.disconnect()
+            self.communication.disconnect()
         del self

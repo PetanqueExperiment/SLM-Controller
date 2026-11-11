@@ -14,16 +14,17 @@ from ctypes import c_double, c_int
 import numpy as np
 
 import libslm.slm as comm
+from libslm.slm import MeadowlarkSLM
 import libslm.parameters as param
 
 
-def _query(dll, name, restype):
+def _query(dll, name, restype, board):
     fn = getattr(dll, name, None)
     if fn is None:
         return None
     fn.argtypes = [c_int]
     fn.restype = restype
-    return fn(comm.BOARD)
+    return fn(board)
 
 
 def _check(label, actual, expected):
@@ -41,24 +42,25 @@ def main():
     print("DLL:", comm.BLINK_DLL, "(found)" if comm.BLINK_DLL.is_file() else "(MISSING)")
     print("LUT:", comm.LUT_FILE, "(found)" if comm.LUT_FILE.is_file() else "(MISSING)")
     print("Board:", comm.BOARD)
+    slm = MeadowlarkSLM(comm.BOARD, simulate=args.simulate)
 
     t0 = time.perf_counter()
     try:
-        comm.connect(simulate=args.simulate)
+        slm.connect()
     except Exception as e:
         print(f"\nFAILED to connect: {type(e).__name__}: {e}")
         return 1
-    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if comm.isSimulated() else ''}")
+    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if slm.isSimulated() else ''}")
 
     all_ok = True
     try:
-        dll = comm._blink_dll
+        dll = slm.dll
         if dll is not None:
-            width = _query(dll, "Get_image_width", c_int)
-            height = _query(dll, "Get_image_height", c_int)
-            depth = _query(dll, "Get_image_depth", c_int)
-            pitch = _query(dll, "Get_pixel_pitch", c_double)
-            serial = _query(dll, "Read_Serial_Number", c_int)
+            width = _query(dll, "Get_image_width", c_int, slm.board)
+            height = _query(dll, "Get_image_height", c_int, slm.board)
+            depth = _query(dll, "Get_image_depth", c_int, slm.board)
+            pitch = _query(dll, "Get_pixel_pitch", c_double, slm.board)
+            serial = _query(dll, "Read_Serial_Number", c_int, slm.board)
             print("\nDevice vs configuration:")
             all_ok &= _check("width", width, param.ImgResX)
             all_ok &= _check("height", height, param.ImgResY)
@@ -67,18 +69,18 @@ def main():
             print(f"  {'pixel pitch':<14} device={pitch!s:<10} config={param.pslm * 1e6:g} um")
             print(f"  {'serial number':<14} {serial}")
 
-        print(f"\nTemperature: {comm.readTemperature():.2f} C")
+        print(f"\nTemperature: {slm.readTemperature():.2f} C")
 
         if args.write_blank:
             frame = np.zeros((comm.H, comm.W), dtype=np.uint8)
             t0 = time.perf_counter()
-            comm.uploadHologram(frame)
+            slm.uploadHologram(frame)
             print(f"Blank frame written in {(time.perf_counter() - t0) * 1e3:.1f} ms")
     except Exception as e:
         print(f"\nFAILED during test: {type(e).__name__}: {e}")
         all_ok = False
     finally:
-        comm.disconnect()
+        slm.disconnect()
         print("Disconnected")
 
     print("\nRESULT:", "OK" if all_ok else "PROBLEMS FOUND")
