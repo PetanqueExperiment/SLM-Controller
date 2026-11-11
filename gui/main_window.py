@@ -1,4 +1,5 @@
 """SLMGUI main window: shared phase state and dock layout."""
+
 from __future__ import annotations
 
 import os
@@ -41,6 +42,7 @@ OUTPUT_HEIGHT_FRACTION = 0.10
 
 class SLMMode:
     """Base class for an operating regime of the SLM; decides which panels are shown."""
+
     name: str = ""
 
 
@@ -58,12 +60,12 @@ class Rearranger(SLMMode):
 
 class SLMGUI(QtWidgets.QMainWindow):
     # --- Construction / device ---
-    parent: Any                       # optional owner passed to __init__ (only set if given)
+    parent: Any  # optional owner passed to __init__ (only set if given)
     _selected_SLM: str
     _simulate_slm: bool
     SLM: SLMDevice
-    SLM_shape: tuple[int, int]        # (Ny, Nx)
-    param_P: int                      # gray levels per 2π (from SLM parameters)
+    SLM_shape: tuple[int, int]  # (Ny, Nx)
+    param_P: int  # gray levels per 2π (from SLM parameters)
 
     # --- Remote control / state saving ---
     _remote_control: dict[str, Callable[..., Any]]
@@ -71,50 +73,50 @@ class SLMGUI(QtWidgets.QMainWindow):
     _hero: Optional[SLMHero]
 
     # --- SLM coordinate grids ---
-    X: np.ndarray                     # (Ny, Nx) x coordinate on the SLM [m]
-    Y: np.ndarray                     # (Ny, Nx) y coordinate on the SLM [m]
-    i_slm: np.ndarray                 # (Ny, Nx) column index
-    _j_slm: np.ndarray                # (Ny, Nx) row index
+    X: np.ndarray  # (Ny, Nx) x coordinate on the SLM [m]
+    Y: np.ndarray  # (Ny, Nx) y coordinate on the SLM [m]
+    i_slm: np.ndarray  # (Ny, Nx) column index
+    _j_slm: np.ndarray  # (Ny, Nx) row index
     deltax: float
     deltay: float
     _epsilon: float
 
     # --- Phase terms summed in updatePhase ---
-    phasePattern: np.ndarray          # (Ny, Nx) pattern from Arbitrary Arrays / Blank [rad]
-    im_grating: np.ndarray            # (Ny, Nx) steering grating from Elementary [rad]
-    fresnelPhase: np.ndarray          # (Ny, Nx) Fresnel lens from Elementary [rad]
-    im_zernike: np.ndarray            # (Ny, Nx) Zernike correction from Aberration [rad]
-    totalPhase: np.ndarray            # (Ny, Nx) uint8 frame last sent to the SLM
+    phasePattern: np.ndarray  # (Ny, Nx) pattern from Arbitrary Arrays / Blank [rad]
+    im_grating: np.ndarray  # (Ny, Nx) steering grating from Elementary [rad]
+    fresnelPhase: np.ndarray  # (Ny, Nx) Fresnel lens from Elementary [rad]
+    im_zernike: np.ndarray  # (Ny, Nx) Zernike correction from Aberration [rad]
+    totalPhase: np.ndarray  # (Ny, Nx) uint8 frame last sent to the SLM
 
     # --- Grating ---
     dx: float
     dy: float
 
     # --- Zernike / aberrations ---
-    _zernike_r: np.ndarray            # (Ny, Nx) normalized pupil radius
-    _zernike_theta: np.ndarray        # (Ny, Nx) polar angle
-    _zernike_pupil_radius: float      # [m]
+    _zernike_r: np.ndarray  # (Ny, Nx) normalized pupil radius
+    _zernike_theta: np.ndarray  # (Ny, Nx) polar angle
+    _zernike_pupil_radius: float  # [m]
     _zernike_coefficients: list[float]
-    zernike_polynomials: np.ndarray   # (n_poly, Ny, Nx), scaled by 2π
+    zernike_polynomials: np.ndarray  # (n_poly, Ny, Nx), scaled by 2π
     aberration_label_list: list[str]
     aberration_poly_indices: list[int]
     aberration_n_primary: int
     aberration_poly_offset: int
-    aberration_values: np.ndarray     # one value per aberration label
+    aberration_values: np.ndarray  # one value per aberration label
 
     # --- Traps / arbitrary arrays ---
     N_traps: int
-    traps_dict: dict[str, Any]        # what Save/Load Hologram pickles
-    traps_pos: np.ndarray             # (N, 4): index, y, x, z [m]; [[]] before traps are loaded
-    traps_k: np.ndarray               # (N, 3) k-vectors; [[]] before traps are loaded
-    theta_traps: np.ndarray           # (N,) trap phases; [] before traps are loaded
-    weight_traps: np.ndarray          # (N,) WGS weights (set by Arbitrary Arrays)
+    traps_dict: dict[str, Any]  # what Save/Load Hologram pickles
+    traps_pos: np.ndarray  # (N, 4): index, y, x, z [m]; [[]] before traps are loaded
+    traps_k: np.ndarray  # (N, 3) k-vectors; [[]] before traps are loaded
+    theta_traps: np.ndarray  # (N,) trap phases; [] before traps are loaded
+    weight_traps: np.ndarray  # (N,) WGS weights (set by Arbitrary Arrays)
     pupil_traps: dict[str, np.ndarray]  # per-trap pupil axes / angle (set by Arbitrary Arrays)
-    _weigth_traps: list               # unused (misspelled; weight_traps is the real one)
+    _weigth_traps: list  # unused (misspelled; weight_traps is the real one)
     _theta_traps_list: list
     _weight_traps_list: list
-    k_dump: np.ndarray                # (2,)
-    file: str                         # last hologram file loaded / saved
+    k_dump: np.ndarray  # (2,)
+    file: str  # last hologram file loaded / saved
 
     # --- TEM01 / SO parameters ---
     spacing: float
@@ -268,15 +270,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         }
 
     def state_to_dict(self):
-        save_list = [
-            "dx",
-            "dy",
-            "aberration_values",
-            "file",
-            "spacing",
-            "theta_deg",
-            "r_pi",
-        ]
+        save_list = ["dx", "dy", "aberration_values", "file", "spacing", "theta_deg", "r_pi"]
 
         for instance_name in save_list:
             self._state_dict[instance_name] = self.__dict__[instance_name]
@@ -311,14 +305,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.SLM_shape = (Ny, Nx)
 
         self.X, self.Y = np.meshgrid(
-            (np.arange(0, Nx, 1) - Nx / 2) * param.pslm,
-            (np.arange(0, Ny, 1) - Ny / 2) * param.pslm,
+            (np.arange(0, Nx, 1) - Nx / 2) * param.pslm, (np.arange(0, Ny, 1) - Ny / 2) * param.pslm
         )
 
-        self.i_slm, self._j_slm = np.meshgrid(
-            np.arange(Nx),
-            np.arange(Ny),
-        )
+        self.i_slm, self._j_slm = np.meshgrid(np.arange(Nx), np.arange(Ny))
 
         self.deltax = 1
         self.deltay = 1
@@ -329,19 +319,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.im_grating = np.zeros([param.ImgResY, param.ImgResX])
         self.fresnelPhase = np.zeros([param.ImgResY, param.ImgResX])
 
-        self._zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5
+        self._zernike_r = (self.X**2 + self.Y**2) ** 0.5
         self._zernike_theta = np.arctan2(self.X, self.Y)
 
         self._zernike_pupil_radius = param.max_radius
-        self._zernike_r = (self.X ** 2 + self.Y ** 2) ** 0.5 / self._zernike_pupil_radius
+        self._zernike_r = (self.X**2 + self.Y**2) ** 0.5 / self._zernike_pupil_radius
 
         self._zernike_coefficients = np.zeros(32).tolist()
 
         self.im_zernike = np.zeros([param.ImgResY, param.ImgResX], dtype=np.float64)
 
-        self.zernike_polynomials = np.asarray(
-            __zernikepolynomials__(self._zernike_r, self._zernike_theta)
-        )
+        self.zernike_polynomials = np.asarray(__zernikepolynomials__(self._zernike_r, self._zernike_theta))
         self.zernike_polynomials[:, self._zernike_r > 1] = 0
         self.zernike_polynomials *= 2 * np.pi
 
@@ -372,9 +360,21 @@ class SLMGUI(QtWidgets.QMainWindow):
             "trefoil 2nd 90",
         ]
         self.aberration_poly_indices = [
-            2, 3, 4, 5, 6, 7, 8, 9,  # defocus … trefoil
-            10, 11, 12, 13, 14,  # asti/coma 2nd, 2nd spherical
-            17, 18,  # trefoil 2nd (Z19/Z20); skip tetrafoil 15–16
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,  # defocus … trefoil
+            10,
+            11,
+            12,
+            13,
+            14,  # asti/coma 2nd, 2nd spherical
+            17,
+            18,  # trefoil 2nd (Z19/Z20); skip tetrafoil 15–16
         ]
         # First N labels go in the left column; the rest are 2nd-order (right column).
         self.aberration_n_primary = 8
@@ -465,16 +465,12 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.elementary = ElementaryControlPanel(self)
         elem_frame = framed_panel(self.elementary)
-        elem_frame.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
-        )
+        elem_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
         left_lay.addWidget(elem_frame)
 
         self._advanced = AdvancedControlPanel(self)
         adv_frame = framed_panel(self._advanced)
-        adv_frame.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
-        )
+        adv_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
         left_lay.addWidget(adv_frame)
         # Aliases for updatePhase / cross-panel reads
         self._ManufacturerCorrectionChkBx = self._advanced.ManufacturerCorrectionChkBx
@@ -487,9 +483,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.aberration = AberrationControlPanel(self)
         aber_frame = framed_panel(self.aberration)
-        aber_frame.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum
-        )
+        aber_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
         left_lay.addWidget(aber_frame)
         left_lay.addStretch(1)
 
@@ -566,9 +560,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         v_s, h_s = 1024, 1272
         v, h = array.shape
         converted_array = np.zeros([v_s, h_s])
-        converted_array[(v_s - v) // 2 : (v_s + v) // 2, (h_s - h) // 2 : (h_s + h) // 2] = np.fliplr(
-            array
-        )
+        converted_array[(v_s - v) // 2 : (v_s + v) // 2, (h_s - h) // 2 : (h_s + h) // 2] = np.fliplr(array)
         return converted_array
 
     def updatePhase(self):

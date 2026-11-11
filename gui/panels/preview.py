@@ -76,10 +76,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.ft_colorbar.setImageItem(self.ft_img_item, insert_in=self.ft_plot.plotItem)
         self._connect_ft_colorbar_levels()
         self.ft_plot.setMinimumSize(200, 220)
-        self.ft_plot.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding,
-            QtWidgets.QSizePolicy.Expanding,
-        )
+        self.ft_plot.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         # Manual / auto level controls for the FT colorbar
         self.ft_levels_row = QtWidgets.QWidget()
@@ -140,25 +137,14 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         else:
             _vb.enableAutoRange(enable=False)
         self.last_sent_plot.plotItem.setClipToView(False)
-        _cb_kw = dict(
-            values=(0, 255),
-            colorMap=_grey_cmap,
-            interactive=False,
-            limits=(0, 255),
-        )
+        _cb_kw = dict(values=(0, 255), colorMap=_grey_cmap, interactive=False, limits=(0, 255))
         try:
             self.last_sent_colorbar = pg.ColorBarItem(colorMapMenu=False, **_cb_kw)
         except TypeError:
             self.last_sent_colorbar = pg.ColorBarItem(**_cb_kw)
-        self.last_sent_colorbar.setImageItem(
-            self.last_sent_img_item,
-            insert_in=self.last_sent_plot.plotItem,
-        )
+        self.last_sent_colorbar.setImageItem(self.last_sent_img_item, insert_in=self.last_sent_plot.plotItem)
         self.last_sent_plot.setMinimumSize(200, 220)
-        self.last_sent_plot.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding,
-            QtWidgets.QSizePolicy.Expanding,
-        )
+        self.last_sent_plot.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         self.last_sent_preview_layout.addWidget(self.label_last_sent_preview, row=0, col=0)
         self.last_sent_preview_layout.addWidget(self.label_ft_preview, row=0, col=1)
@@ -258,7 +244,7 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         cy, cx = (ny - 1) / 2.0, (nx - 1) / 2.0
         yy, xx = np.ogrid[:ny, :nx]
         r0 = radius_frac * min(ny, nx)
-        return (yy - cy) ** 2 + (xx - cx) ** 2 > r0 ** 2
+        return (yy - cy) ** 2 + (xx - cx) ** 2 > r0**2
 
     def _compute_ft_auto_levels(self, intensity):
         """Percentile limits from off-center pixels (avoids zero-order dominance)."""

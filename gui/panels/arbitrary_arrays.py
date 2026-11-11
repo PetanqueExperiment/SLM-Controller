@@ -1,4 +1,5 @@
 """Arbitrary arrays panel (patterns, traps, algorithms, equalization)."""
+
 import json
 import os
 import pickle
@@ -96,12 +97,12 @@ class Equalization_intensity_thread(QtCore.QThread):
     def keepCheckingFile(self):
 
         if self.go_on_reading_message:
-            #Check the file for instruction
+            # Check the file for instruction
             with open(MESSAGE_FILE, 'r') as message_read:
                 text = [x.strip().split('\t') for x in message_read]
             message_read.close()
 
-            #Check instruction
+            # Check instruction
             try:
                 instruction = text[0][0]
             except Exception:
@@ -119,7 +120,6 @@ class Equalization_intensity_thread(QtCore.QThread):
 
         # repeat the loop.
         self.timer.singleShot(0, self.keepCheckingFile)
-
 
 
 class ArbitraryArraysPanel(QtWidgets.QWidget):
@@ -267,9 +267,9 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             print('Run aborted: could not load trap coordinates.')
             return
 
-        try :
+        try:
             image = self.gui.methodList[method]()
-        except :
+        except:
             print('method not in list')
             raise
 
@@ -288,9 +288,9 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.file = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Hologram', SLM_PATTERNS_DIR)[0]
         if not self.gui.file:
             return
-        self.savePattern(name = self.gui.file)
+        self.savePattern(name=self.gui.file)
 
-    def savePattern(self, name = ''):
+    def savePattern(self, name=''):
         '''
         Opens the dialog and saves the selected file
         '''
@@ -299,7 +299,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return
 
         self.gui.file = name
-        if not(self.gui.file[-4:] == '.pkl'):
+        if not (self.gui.file[-4:] == '.pkl'):
             self.gui.file += '.pkl'
 
         self.pack_traps_dict()
@@ -307,7 +307,6 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         a_file = open(self.gui.file, "wb")
         pickle.dump(self.gui.traps_dict, a_file)
         a_file.close()
-
 
     def loadPattern_clicked(self):
         '''
@@ -317,22 +316,22 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.file = QtWidgets.QFileDialog.getOpenFileName(self, 'Load Hologram', SLM_PATTERNS_DIR)[0]
         if not self.gui.file:
             return
-        self.loadPattern(name = self.gui.file)
+        self.loadPattern(name=self.gui.file)
 
-    def loadPattern(self, name = ''):
+    def loadPattern(self, name=''):
         print('SLM file')
         print(name)
         self.gui.file = name
 
-        #obsolete
+        # obsolete
         if name[-3:] == 'npy':
             self.gui.phasePattern = np.load(name)
-            self.gui.phasePattern = self.gui.phasePattern[:,:792] #in case that the pattern size is 600x800
-        #obsolete
+            self.gui.phasePattern = self.gui.phasePattern[:, :792]  # in case that the pattern size is 600x800
+        # obsolete
         elif name[-3:] == 'bmp':
             self.gui.phasePattern = np.asarray(Image.open(name), dtype=np.float64)
-            self.gui.phasePattern *= 2*np.pi/256
-        #current
+            self.gui.phasePattern *= 2 * np.pi / 256
+        # current
         elif name[-3:] == 'pkl':
             try:
                 a_file = open(self.gui.file, "rb")
@@ -346,7 +345,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             pass
         else:
             print('Incorrect file type')
-            print('You are too stupid!!!!!!') ### Chew and Sylvain.
+            print('You are too stupid!!!!!!')  ### Chew and Sylvain.
 
         self.gui.updatePhase()
 
@@ -359,33 +358,32 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui.traps_dict['phasePattern'] = self.gui.phasePattern
 
     def unpack_traps_dict(self):
-        self.gui.traps_pos      = self.gui.traps_dict['traps_pos']
-        self.gui.traps_k        = self.gui.traps_dict['traps_k']
-        self.gui.N_traps        = int(self.gui.traps_pos.shape[0])
-        self.gui.theta_traps    = self.gui.traps_dict['theta_traps']
-        self.gui.weight_traps   = self.gui.traps_dict['weight_traps']
-        self.gui.pupil_traps    = self.gui.traps_dict['pupil_traps']
-        self.gui.phasePattern   = self.gui.traps_dict['phasePattern']
+        self.gui.traps_pos = self.gui.traps_dict['traps_pos']
+        self.gui.traps_k = self.gui.traps_dict['traps_k']
+        self.gui.N_traps = int(self.gui.traps_pos.shape[0])
+        self.gui.theta_traps = self.gui.traps_dict['theta_traps']
+        self.gui.weight_traps = self.gui.traps_dict['weight_traps']
+        self.gui.pupil_traps = self.gui.traps_dict['pupil_traps']
+        self.gui.phasePattern = self.gui.traps_dict['phasePattern']
 
-        #Added in v29 to allow recompute the hologram based on updated traps_dict parameters
+        # Added in v29 to allow recompute the hologram based on updated traps_dict parameters
         if 'computeHologram' in self.gui.traps_dict.keys():
             print(self.gui.traps_dict['computeHologram'])
 
-            if self.gui.traps_dict['computeHologram'] :
+            if self.gui.traps_dict['computeHologram']:
                 ph = self.computeHologram()
                 if ph is not None:
                     self.gui.phasePattern = ph
                     self.gui.updatePhase()
 
-
-
-    #==============================================================================
+    # ==============================================================================
     # Elementary patterns
-    #==============================================================================
+    # ==============================================================================
     def generateBlank(self):
         '''Generates a blank phase mask'''
         self.gui.phasePattern = np.zeros([param.ImgResY, param.ImgResX])
         self.gui.updatePhase()
+
     def _resolve_rois_json_path(self, base):
         """Resolve path to PyCam ``rois.json`` (``Tweezer_ROIs/`` or an existing file path)."""
         tweezer_dir = os.path.join(LOCAL_DIR, 'Tweezer_ROIs')
@@ -473,10 +471,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         print('Trap coordinates not in memory; loading from trap file field…')
         ok = self._load_traps_from_pattern_file(verbose=False)
         if not ok:
-            print(
-                'Could not load trap coordinates. Set the rois basename '
-                '(Tweezer_ROIs or full path to .json).'
-            )
+            print('Could not load trap coordinates. Set the rois basename ' '(Tweezer_ROIs or full path to .json).')
         return ok
 
     def _finalize_trap_generation(self):
@@ -527,10 +522,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         os.makedirs(TWEEZER_ROIS_DIR, exist_ok=True)
         default_path = os.path.join(TWEEZER_ROIS_DIR, 'rois.json')
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            'Save trap coordinates (rois.json)',
-            default_path,
-            'PyCam ROIs (*.json)',
+            self, 'Save trap coordinates (rois.json)', default_path, 'PyCam ROIs (*.json)'
         )
         if not path:
             return
@@ -608,10 +600,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         """Pick one or more ``rois.json`` files and overlay their trap centers (camera pixels) in one window."""
         start = self._resolve_rois_json_path(self.loadTrapPositionsEdt.text()) or TWEEZER_ROIS_DIR
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self,
-            'Plot trap coordinates',
-            start,
-            'PyCam ROIs (*.json);;All files (*.*)',
+            self, 'Plot trap coordinates', start, 'PyCam ROIs (*.json);;All files (*.*)'
         )
         for path in paths:
             self._plot_traps_file(path)
@@ -649,8 +638,14 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         self.gui._trap_plot_count += 1
         name = '%s (%d)' % (os.path.basename(path), centers.shape[0])
         win.plot(
-            centers[:, 0], centers[:, 1],
-            pen=None, symbol='o', symbolSize=8, symbolBrush=color, symbolPen=None, name=name,
+            centers[:, 0],
+            centers[:, 1],
+            pen=None,
+            symbol='o',
+            symbolSize=8,
+            symbolBrush=color,
+            symbolPen=None,
+            name=name,
         )
         if centers.shape[0] <= 200:
             for i, (x, y) in enumerate(centers):
@@ -718,83 +713,82 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
     # ============================================================================
     def equalize_with_atoms(self):
         print('equalize with atoms')
-        signal = np.load(DIR_SHARED_DETEKTOR+'/map.npy')
+        signal = np.load(DIR_SHARED_DETEKTOR + '/map.npy')
         # signal += 1-np.mean(signal)
-        print('current stdev: %.1f'%(np.std(signal)*100))
+        print('current stdev: %.1f' % (np.std(signal) * 100))
 
-        self.gui.equalize_gain = 1.#float(self.equalize_gain_le.text())
+        self.gui.equalize_gain = 1.0  # float(self.equalize_gain_le.text())
 
-        #Update hologram
-        self.gui.phasePattern = self.GS_intensity(signal,self.gui.equalize_gain)
+        # Update hologram
+        self.gui.phasePattern = self.GS_intensity(signal, self.gui.equalize_gain)
         if self.gui.phasePattern is None:
             return
 
         self.gui.updatePhase()
 
-        #save hologram information
+        # save hologram information
         timestr = time.strftime("%Y%m%d_%H%M%S")
-        self.savePattern(name = LOCAL_DIR+'\\holograms\\equalized_with_atoms_'+timestr+'.pkl')
+        self.savePattern(name=LOCAL_DIR + '\\holograms\\equalized_with_atoms_' + timestr + '.pkl')
 
-    def devide_slm_area(self, change = True, signal = None ):
-
+    def devide_slm_area(self, change=True, signal=None):
         """
         With Martin we change only part of the hologram to gain more precission in equalizing the trap intensity.
         """
 
-
-        if signal== None:
-            signal = np.load(DIR_SHARED_DETEKTOR+'/map.npy')
+        if signal == None:
+            signal = np.load(DIR_SHARED_DETEKTOR + '/map.npy')
 
         else:
             signal = self.gui.map
 
-
         # signal += 1-np.mean(signal)
-        if change :
-            print('current stdev: %.1f'%(np.std(signal)*100))
-        else :
+        if change:
+            print('current stdev: %.1f' % (np.std(signal) * 100))
+        else:
             print('no change of initial hologram')
 
-        self.gui.equalize_gain = 1.#float(self.equalize_gain_le.text())
+        self.gui.equalize_gain = 1.0  # float(self.equalize_gain_le.text())
 
-        #Update hologram
+        # Update hologram
         phasePattern_orig = self.gui.phasePattern
-        phasePattern_cal = self.GS_intensity(signal,self.gui.equalize_gain)
+        phasePattern_cal = self.GS_intensity(signal, self.gui.equalize_gain)
         if phasePattern_cal is None:
             return
 
-        if np.std(signal) < 0.6 :
-            k = rd.randint(0,2)
-            l = rd.randint(0,2)
+        if np.std(signal) < 0.6:
+            k = rd.randint(0, 2)
+            l = rd.randint(0, 2)
 
-            y_len = 792 #param.ImgResX
-            x_len = 600 #param.ImgResY
+            y_len = 792  # param.ImgResX
+            x_len = 600  # param.ImgResY
 
-        # type(param.ImgResX)
+            # type(param.ImgResX)
             d_phi = phasePattern_cal - phasePattern_orig
 
-            phasePattern_cal += 3*d_phi
-            phasePattern_orig[k*(x_len//2):(k+1)*(x_len//2), l*(y_len//2): (l+1)*(y_len//2)] = phasePattern_cal[k*(x_len//2):(k+1)*(x_len//2), l*(y_len//2): (l+1)*(y_len//2)]
-        else :
+            phasePattern_cal += 3 * d_phi
+            phasePattern_orig[k * (x_len // 2) : (k + 1) * (x_len // 2), l * (y_len // 2) : (l + 1) * (y_len // 2)] = (
+                phasePattern_cal[k * (x_len // 2) : (k + 1) * (x_len // 2), l * (y_len // 2) : (l + 1) * (y_len // 2)]
+            )
+        else:
             phasePattern_orig = phasePattern_cal
 
         self.gui.phasePattern = phasePattern_orig
 
         self.gui.updatePhase()
 
-        #save hologram information
+        # save hologram information
         timestr = time.strftime("%Y%m%d_%H%M%S")
 
-        hologram_save_file = LOCAL_DIR+'\\holograms\\equalized_with_atoms_'+timestr+'.pkl'
-        self.savePattern(name = LOCAL_DIR+'\\holograms\\equalized_with_atoms_'+timestr+'.pkl')
+        hologram_save_file = LOCAL_DIR + '\\holograms\\equalized_with_atoms_' + timestr + '.pkl'
+        self.savePattern(name=LOCAL_DIR + '\\holograms\\equalized_with_atoms_' + timestr + '.pkl')
 
         print('done partial phase correction, saved at : ' + hologram_save_file)
 
-    def devide_slm_area_loop(self, loop = None):
+    def devide_slm_area_loop(self, loop=None):
 
         global trap_equalization
         trap_equalization = reload(trap_equalization)
-        #best_hologram =
+        # best_hologram =
         folder_dir = self.gui.parent.experiment_directory
 
         change = True
@@ -804,27 +798,25 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             pass
         else:
             loop = int(loop)
-            loop = int(loop-1)
-            if loop !=0.0 :
+            loop = int(loop - 1)
+            if loop != 0.0:
                 current_map = self.gui.map
 
-            self.gui.map = trap_equalization.cal(folder_dir, loop = loop)
+            self.gui.map = trap_equalization.cal(folder_dir, loop=loop)
 
-            std = np.std(self.gui.map) #martin
+            std = np.std(self.gui.map)  # martin
             print(std)
-            if std > self.gui.std and (self.gui.std * 100) < 0.5 : #martin
+            if std > self.gui.std and (self.gui.std * 100) < 0.5:  # martin
                 change = False
                 self.gui.map = current_map
                 self.gui.phasePattern = self.gui.best_hologram
 
-            else : #martin
-                self.gui.std = std #martin
-                self.gui.best_hologram = self.gui.phasePattern #martin
-                print('new point') #martin
+            else:  # martin
+                self.gui.std = std  # martin
+                self.gui.best_hologram = self.gui.phasePattern  # martin
+                print('new point')  # martin
 
-            self.devide_slm_area(change, signal = 1)
-
-
+            self.devide_slm_area(change, signal=1)
 
     ###########################################################################
     # Algorithms for phase calculation
@@ -842,12 +834,12 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return None
         # Calculate phase pattern with homemade gpu function
         phi = trap_phase_to_slm(
-                self.gui.traps_k,
-                self.gui.theta_traps,
-                self.gui.weight_traps,
-                self.gui.pupil_traps,
-                shape = self.gui.SLM_shape,
-                )
+            self.gui.traps_k,
+            self.gui.theta_traps,
+            self.gui.weight_traps,
+            self.gui.pupil_traps,
+            shape=self.gui.SLM_shape,
+        )
 
         return phi
 
@@ -857,16 +849,16 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         '''
         if not self._ensure_traps_loaded():
             return None
-        randmat = np.ceil(np.random.rand(param.ImgResY,param.ImgResX)*self.gui.N_traps).astype(int)
+        randmat = np.ceil(np.random.rand(param.ImgResY, param.ImgResX) * self.gui.N_traps).astype(int)
 
-        phi = np.zeros((param.ImgResY,param.ImgResX))
+        phi = np.zeros((param.ImgResY, param.ImgResX))
 
         for i in range(param.ImgResY):
             for j in range(param.ImgResX):
-                random_trap = randmat[i,j]-1
+                random_trap = randmat[i, j] - 1
 
                 k_x, k_y = self.gui.traps_k[random_trap]
-                phi[i,j] = self.gui.i_slm*k_x + self.gui.y_slm*k_y
+                phi[i, j] = self.gui.i_slm * k_x + self.gui.y_slm * k_y
 
         return phi
 
@@ -889,7 +881,7 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         '''
         if not self._ensure_traps_loaded():
             return None
-        self.gui.theta_traps = np.random.rand(self.gui.N_traps)*2*np.pi
+        self.gui.theta_traps = np.random.rand(self.gui.N_traps) * 2 * np.pi
         self.gui.weight_traps = np.ones(self.gui.N_traps)
 
         phi = self.computeHologram()
@@ -905,56 +897,56 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return None
         GS_maxit = int(self.iterationsEdit.text())
 
-        #Get initial random phases
-        self.gui.theta_traps = np.random.rand(self.gui.N_traps)*2*np.pi
+        # Get initial random phases
+        self.gui.theta_traps = np.random.rand(self.gui.N_traps) * 2 * np.pi
         self.gui.weight_traps = np.ones(self.gui.N_traps)
 
-        #Calculate phase pattern with homemade gpu function
+        # Calculate phase pattern with homemade gpu function
         phi = self.computeHologram()
         if phi is None:
             return None
 
-        #(a) Calculate the intensity at trap position
-        traps_amplitude = 1./param.ImgResY/param.ImgResX*slm_to_trap_amp(phi, self.gui.traps_k)
+        # (a) Calculate the intensity at trap position
+        traps_amplitude = 1.0 / param.ImgResY / param.ImgResX * slm_to_trap_amp(phi, self.gui.traps_k)
 
-        trap_intensities = np.real(traps_amplitude*np.conj(traps_amplitude))
+        trap_intensities = np.real(traps_amplitude * np.conj(traps_amplitude))
         efficiency = np.sum(trap_intensities)
-        uniformity = np.std(trap_intensities)/np.mean(trap_intensities)
+        uniformity = np.std(trap_intensities) / np.mean(trap_intensities)
 
         print('1st calculation:')
-        print('Efficiency std = %.1f'%(efficiency*100))
-        print('Intensity std = %.1f'%(uniformity*100))
+        print('Efficiency std = %.1f' % (efficiency * 100))
+        print('Intensity std = %.1f' % (uniformity * 100))
         _pump_gui()
 
-        #Start the iterations5
+        # Start the iterations5
         for k in range(GS_maxit):
-            print ('    GS ' + str(k+1) +'/' + str(GS_maxit))
+            print('    GS ' + str(k + 1) + '/' + str(GS_maxit))
 
-            #(a) Calculate the phase of each trap
-            if k == 0: #(b0) if first time: start with random phases
-                self.gui.theta_traps = np.random.rand(self.gui.N_traps)*2*np.pi
+            # (a) Calculate the phase of each trap
+            if k == 0:  # (b0) if first time: start with random phases
+                self.gui.theta_traps = np.random.rand(self.gui.N_traps) * 2 * np.pi
                 self.gui.weight_traps = np.ones(self.gui.N_traps)
-            else: #(b0)else  apply the GS technique
+            else:  # (b0)else  apply the GS technique
                 self.gui.theta_traps = np.angle(traps_amplitude)
 
-            #(c) Calculate the new slm phase
+            # (c) Calculate the new slm phase
             phi = self.computeHologram()
             if phi is None:
                 return None
 
-            #(a) Calculate the intensity at trap position
-            traps_amplitude = 1./param.ImgResY/param.ImgResX*slm_to_trap_amp(phi, self.gui.traps_k)
+            # (a) Calculate the intensity at trap position
+            traps_amplitude = 1.0 / param.ImgResY / param.ImgResX * slm_to_trap_amp(phi, self.gui.traps_k)
 
-            trap_intensities = np.real(traps_amplitude*np.conj(traps_amplitude))
+            trap_intensities = np.real(traps_amplitude * np.conj(traps_amplitude))
             efficiency = np.sum(trap_intensities)
-            uniformity = np.std(trap_intensities)/np.mean(trap_intensities)
-            print('Efficiency std = %.1f'%(efficiency*100))
-            print('Intensity std = %.1f'%(uniformity*100))
+            uniformity = np.std(trap_intensities) / np.mean(trap_intensities)
+            print('Efficiency std = %.1f' % (efficiency * 100))
+            print('Intensity std = %.1f' % (uniformity * 100))
             _pump_gui()
 
         return phi
 
-    def WGS(self, correct_diffraction_efficiency = False):
+    def WGS(self, correct_diffraction_efficiency=False):
         '''
         Weighted Gerchberg−Saxton (GS). Otpimize the phase and weigth of each grating.
         '''
@@ -965,22 +957,27 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         if correct_diffraction_efficiency:
             # Calculate the radial displacement of each traps
-            traps_displacements = ( (self.gui.traps_pos[:,1]+self.gui.dx*1e-6)**2 + (self.gui.traps_pos[:,2]+self.gui.dy*1e-6)**2 )**0.5
+            traps_displacements = (
+                (self.gui.traps_pos[:, 1] + self.gui.dx * 1e-6) ** 2
+                + (self.gui.traps_pos[:, 2] + self.gui.dy * 1e-6) ** 2
+            ) ** 0.5
 
             # The SLM diffraction efficiency depends on the displacement of the traps
-            SLM_diffraction_efficiency = 1. - 0.5*traps_displacements/SLM_DIFFRACTION_EFFICIENCY_HWHM
+            SLM_diffraction_efficiency = 1.0 - 0.5 * traps_displacements / SLM_DIFFRACTION_EFFICIENCY_HWHM
 
             # The linear model reaches zero at 2*HWHM; beyond that the weights would become NaN
             if np.any(SLM_diffraction_efficiency <= 0):
-                print('WGS aborted: traps reach %.0f um from the center, but the SLM efficiency '
-                      'model is only valid below %.0f um. Use plain WGS for this trap file.'
-                      % (np.max(traps_displacements)*1e6, 2*SLM_DIFFRACTION_EFFICIENCY_HWHM*1e6))
+                print(
+                    'WGS aborted: traps reach %.0f um from the center, but the SLM efficiency '
+                    'model is only valid below %.0f um. Use plain WGS for this trap file.'
+                    % (np.max(traps_displacements) * 1e6, 2 * SLM_DIFFRACTION_EFFICIENCY_HWHM * 1e6)
+                )
                 return None
 
             # Correct for the limited diffraction efficiency
-            target_intensities = 1./SLM_diffraction_efficiency
+            target_intensities = 1.0 / SLM_diffraction_efficiency
             target_amplitudes = target_intensities**0.5
-            target_amplitudes_norm = target_amplitudes/np.mean(target_amplitudes)
+            target_amplitudes_norm = target_amplitudes / np.mean(target_amplitudes)
 
         else:
             target_intensities = np.ones(self.gui.N_traps)
@@ -995,24 +992,24 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
             return None
 
         # Measure the trap to trap deviation of intensity
-        traps_amplitude         = 1./param.ImgResY/param.ImgResX*slm_to_trap_amp(phi, self.gui.traps_k)
-        trap_intensities        = np.real(traps_amplitude*np.conj(traps_amplitude))
-        deviation_from_target   = trap_intensities/target_intensities
-        rel_dev                 = deviation_from_target**0.5/np.mean(deviation_from_target**0.5)
-        efficiency              = np.sum(trap_intensities)
-        uniformity              = np.std(deviation_from_target)/np.mean(deviation_from_target)
+        traps_amplitude = 1.0 / param.ImgResY / param.ImgResX * slm_to_trap_amp(phi, self.gui.traps_k)
+        trap_intensities = np.real(traps_amplitude * np.conj(traps_amplitude))
+        deviation_from_target = trap_intensities / target_intensities
+        rel_dev = deviation_from_target**0.5 / np.mean(deviation_from_target**0.5)
+        efficiency = np.sum(trap_intensities)
+        uniformity = np.std(deviation_from_target) / np.mean(deviation_from_target)
 
         print('Initial calculation:')
-        print('Efficiency std = %.1f'%(efficiency*100))
-        print('Intensity std = %.1f'%(uniformity*100))
+        print('Efficiency std = %.1f' % (efficiency * 100))
+        print('Intensity std = %.1f' % (uniformity * 100))
         _pump_gui()
 
         # Start the iterations
         for k in range(GSW_maxit):
             print('    WGS %d/%d' % (k + 1, GSW_maxit))
             # Calculate new phases and weights
-            self.gui.theta_traps  = np.angle(traps_amplitude)
-            self.gui.weight_traps *= 1. / rel_dev
+            self.gui.theta_traps = np.angle(traps_amplitude)
+            self.gui.weight_traps *= 1.0 / rel_dev
 
             # Calculate new hologram
             phi = self.computeHologram()
@@ -1020,19 +1017,19 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
                 return None
 
             # Calculate new trap intensities
-            traps_amplitude         = 1./param.ImgResY/param.ImgResX*slm_to_trap_amp(phi, self.gui.traps_k)
-            trap_intensities        = np.real(traps_amplitude*np.conj(traps_amplitude))
-            deviation_from_target   = trap_intensities/target_intensities
-            rel_dev                 = deviation_from_target**0.5/np.mean(deviation_from_target**0.5)
-            efficiency              = np.sum(trap_intensities)
-            uniformity              = np.std(deviation_from_target)/np.mean(deviation_from_target)
-            print('Efficiency std = %.1f'%(efficiency*100))
-            print('Intensity std = %.1f'%(uniformity*100))
+            traps_amplitude = 1.0 / param.ImgResY / param.ImgResX * slm_to_trap_amp(phi, self.gui.traps_k)
+            trap_intensities = np.real(traps_amplitude * np.conj(traps_amplitude))
+            deviation_from_target = trap_intensities / target_intensities
+            rel_dev = deviation_from_target**0.5 / np.mean(deviation_from_target**0.5)
+            efficiency = np.sum(trap_intensities)
+            uniformity = np.std(deviation_from_target) / np.mean(deviation_from_target)
+            print('Efficiency std = %.1f' % (efficiency * 100))
+            print('Intensity std = %.1f' % (uniformity * 100))
             _pump_gui()
 
         return phi
 
-    def GS_intensity(self,measured_intensities,equalize_gain = 1.):
+    def GS_intensity(self, measured_intensities, equalize_gain=1.0):
         '''
         Adjust the weight of each trap according to the measured intensities
         Keep the same phase for each trap
@@ -1048,7 +1045,6 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
 
         return phi
 
-
     def GAA(self):
         '''
         Generalized adaptive additive
@@ -1056,38 +1052,52 @@ class ArbitraryArraysPanel(QtWidgets.QWidget):
         if not self._ensure_traps_loaded():
             return None
         GAA_maxit = int(self.iterationsEdit.text())
-        Vtraps_it = np.zeros(self.gui.N_traps,dtype=complex)
+        Vtraps_it = np.zeros(self.gui.N_traps, dtype=complex)
 
         phi = self.randomSuperposition()
         if phi is None:
             return None
         print('SR guess created')
 
-        #Measure the trap to trap deviation of intensity
+        # Measure the trap to trap deviation of intensity
         for k in range(self.gui.N_traps):
-            Vtraps_it[k] = 1/param.ImgResY/param.ImgResX*np.sum(np.sum(np.exp(1j *(phi-self.gui.delta_traps[:,:,k])), axis=0), axis=0)
-        trap_intensities = np.real(Vtraps_it*np.conj(Vtraps_it))
+            Vtraps_it[k] = (
+                1
+                / param.ImgResY
+                / param.ImgResX
+                * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, k])), axis=0), axis=0)
+            )
+        trap_intensities = np.real(Vtraps_it * np.conj(Vtraps_it))
         efficiency = np.sum(trap_intensities)
-        uniformity = np.std(trap_intensities)/np.mean(trap_intensities)
-        print('Efficiency std = %.1f'%(efficiency*100))
-        print('Intensity std = %.1f'%(uniformity*100))
+        uniformity = np.std(trap_intensities) / np.mean(trap_intensities)
+        print('Efficiency std = %.1f' % (efficiency * 100))
+        print('Intensity std = %.1f' % (uniformity * 100))
 
         for k in range(GAA_maxit):
 
-            print ('Iteration ' + str(k+1) +'/' + str(GAA_maxit))
+            print('Iteration ' + str(k + 1) + '/' + str(GAA_maxit))
             Vtraps_it_mod = np.sqrt(Vtraps_it * np.conj(Vtraps_it))
-            phi = np.angle(np.sum(
-                    np.exp(1j*self.gui.delta_traps)*Vtraps_it/Vtraps_it_mod *(1-self.gui.GAA_xi+self.gui.GAA_xi/Vtraps_it_mod),
-                    axis=2
-                    ))
+            phi = np.angle(
+                np.sum(
+                    np.exp(1j * self.gui.delta_traps)
+                    * Vtraps_it
+                    / Vtraps_it_mod
+                    * (1 - self.gui.GAA_xi + self.gui.GAA_xi / Vtraps_it_mod),
+                    axis=2,
+                )
+            )
 
             for j in range(self.gui.N_traps):
-                Vtraps_it[j] = 1/param.ImgResY/param.ImgResX*np.sum(np.sum(np.exp(1j * (phi-self.gui.delta_traps[:,:,j])),axis=0),axis=0)
-            trap_intensities = Vtraps_it*np.conj(Vtraps_it)
+                Vtraps_it[j] = (
+                    1
+                    / param.ImgResY
+                    / param.ImgResX
+                    * np.sum(np.sum(np.exp(1j * (phi - self.gui.delta_traps[:, :, j])), axis=0), axis=0)
+                )
+            trap_intensities = Vtraps_it * np.conj(Vtraps_it)
             efficiency = np.real(np.sum(trap_intensities))
-            uniformity = np.std(trap_intensities)/np.mean(trap_intensities)
-            print('Efficiency std = %.1f'%(efficiency*100))
-            print('Intensity std = %.1f'%(uniformity*100))
+            uniformity = np.std(trap_intensities) / np.mean(trap_intensities)
+            print('Efficiency std = %.1f' % (efficiency * 100))
+            print('Intensity std = %.1f' % (uniformity * 100))
 
         return phi
-

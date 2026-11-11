@@ -1,4 +1,5 @@
 """Output dock (stdout/stderr log)."""
+
 import pyqtgraph as pg
 import pyqtgraph.dockarea as dockarea
 from pyqtgraph.Qt import QtGui, QtWidgets
@@ -31,4 +32,3 @@ class OutputDock:
         out_wrap.addWidget(self.gui.output_log, row=1, col=0)
         self.gui.d_output.addWidget(out_wrap)
         self.gui.area.addDock(self.gui.d_output, "bottom")
-

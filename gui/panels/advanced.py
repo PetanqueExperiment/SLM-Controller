@@ -10,7 +10,6 @@ from gui.constants import PUPIL_VERTICAL_OFFSET, position_to_step_per_pixel
 from gpu_module_v7_3 import trap_phase_to_slm
 
 
-
 class AdvancedControlPanel(QtWidgets.QWidget):
     """Owns this panel's widgets and handlers. Shared phase state is on ``self.gui``."""
 
@@ -161,25 +160,25 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
     def update_k_dump(self):
         d_out = float(self.gui.pupilOutLineEdit.text())
-        self.gui.k_dump = np.array([d_out,0])*1e-6*position_to_step_per_pixel
+        self.gui.k_dump = np.array([d_out, 0]) * 1e-6 * position_to_step_per_pixel
 
     def calculatePupil(self):
         d_out = float(self.gui.pupilOutLineEdit.text())
-        dphi_x = 2*np.pi/param.lamb * param.M/param.f * d_out*1e-6
-        dphi_y = 2*np.pi/param.lamb * param.M/param.f * d_out*1e-6
-        self.gui.grating_out = self.gui.X*dphi_x + self.gui.Y*dphi_y
+        dphi_x = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
+        dphi_y = 2 * np.pi / param.lamb * param.M / param.f * d_out * 1e-6
+        self.gui.grating_out = self.gui.X * dphi_x + self.gui.Y * dphi_y
 
-        pupil_x0 = float(self.gui.pupilCenterEdt_x0.text())*1e-3
-        pupil_y0 = float(self.gui.pupilCenterEdt_y0.text())*1e-3
+        pupil_x0 = float(self.gui.pupilCenterEdt_x0.text()) * 1e-3
+        pupil_y0 = float(self.gui.pupilCenterEdt_y0.text()) * 1e-3
         # self.gui.pupil_type = str(self.pupilTypeCB.currentText())
         self.gui.pupil_type = 'circular'
-        self.gui.pupil = np.zeros((param.ImgResY,param.ImgResX)).astype('float64')
+        self.gui.pupil = np.zeros((param.ImgResY, param.ImgResX)).astype('float64')
 
         if self.gui.pupil_type == 'circular':
-            r_pupil = float(self.gui.pupilEdt.text())*1e-3
+            r_pupil = float(self.gui.pupilEdt.text()) * 1e-3
 
-            self.gui.pupil[((self.gui.X - pupil_x0)**2 + (self.gui.Y - pupil_y0)**2)< r_pupil**2] = 1.
-            self.gui.grating_out[((self.gui.X - pupil_x0)**2 + (self.gui.Y - pupil_y0)**2)< r_pupil**2] = 0.
+            self.gui.pupil[((self.gui.X - pupil_x0) ** 2 + (self.gui.Y - pupil_y0) ** 2) < r_pupil**2] = 1.0
+            self.gui.grating_out[((self.gui.X - pupil_x0) ** 2 + (self.gui.Y - pupil_y0) ** 2) < r_pupil**2] = 0.0
 
         # elif self.gui.pupil_type == 'rectangular':
         #     txt = self.gui.pupilEdt.text()
@@ -212,7 +211,6 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         #     self.gui.pupil = np.ones((param.ImgResY,param.ImgResX)).astype('float64')
 
         self.gui.updatePhase()
-
 
     def applyPupil(self):
         '''
@@ -270,10 +268,9 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.gui.totalPhase *= self.gui.pupil
         self.gui.totalPhase += self.gui.grating_out
 
-
-    def apply_pupil_longaxis_byatom_loop(self, longaxis_ratio = 1.0):
+    def apply_pupil_longaxis_byatom_loop(self, longaxis_ratio=1.0):
         txt = self.gui.pupilEdt.text()
-        width, height, θ = np.array(txt.split(','),dtype = 'float')
+        width, height, θ = np.array(txt.split(','), dtype='float')
 
         width = longaxis_ratio
 
@@ -282,9 +279,9 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
         self.gui.updatePhase()
 
-    def apply_pupil_shortaxis_byatom_loop(self, shortaxis_ratio = 1.0):
+    def apply_pupil_shortaxis_byatom_loop(self, shortaxis_ratio=1.0):
         txt = self.gui.pupilEdt.text()
-        width, height, θ = np.array(txt.split(','),dtype = 'float')
+        width, height, θ = np.array(txt.split(','), dtype='float')
 
         height = shortaxis_ratio
 
@@ -299,15 +296,15 @@ class AdvancedControlPanel(QtWidgets.QWidget):
 
         Shift the phase by pi in an inner disk of radius defined by the user
         '''
-        r = float(self.sizeRingEdt.text())/1000
+        r = float(self.sizeRingEdt.text()) / 1000
 
-        phi_ovula = np.zeros((param.ImgResY,param.ImgResX))
+        phi_ovula = np.zeros((param.ImgResY, param.ImgResX))
         for i in range(param.ImgResY):
             for j in range(param.ImgResX):
-                if ((self.gui.X[i,j]**2 + self.gui.Y[i,j]**2)< r**2):
-                    phi_ovula[i,j+PUPIL_VERTICAL_OFFSET] = np.pi
+                if (self.gui.X[i, j] ** 2 + self.gui.Y[i, j] ** 2) < r**2:
+                    phi_ovula[i, j + PUPIL_VERTICAL_OFFSET] = np.pi
                 else:
-                    phi_ovula[i,j+PUPIL_VERTICAL_OFFSET] = 0
+                    phi_ovula[i, j + PUPIL_VERTICAL_OFFSET] = 0
 
         self.gui.phi_ovula = phi_ovula
         self.gui.updatePhase()
@@ -323,17 +320,25 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         else:
             self.gui.spacing = float(self.tem01spacingEdt.text())
 
-        phi_tem01 = np.zeros((param.ImgResY,param.ImgResX))
+        phi_tem01 = np.zeros((param.ImgResY, param.ImgResX))
         P_factor = float(self.tem01PfactorEdt.text())
 
         self.gui.theta_deg = float(self.tem01ThetaEdt.text())
-        theta_rad = self.gui.theta_deg/180*np.pi
-        x = np.arange(-param.ImgResX/2,param.ImgResX/2)*param.pslm
-        y = np.arange(-param.ImgResY/2,param.ImgResY/2)*param.pslm
-        X,Y = np.meshgrid(x,y)
-        amp_list = np.sin(-2*np.pi*0.5*self.gui.spacing*1e-6*(np.cos(theta_rad)*Y+np.sin(theta_rad)*X)/(param.lamb*param.f/param.M))
-        phase_list = np.array([amp_list >= 0])*np.pi*P_factor
-        phi_tem01 = phase_list[0,:,:]
+        theta_rad = self.gui.theta_deg / 180 * np.pi
+        x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
+        y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
+        X, Y = np.meshgrid(x, y)
+        amp_list = np.sin(
+            -2
+            * np.pi
+            * 0.5
+            * self.gui.spacing
+            * 1e-6
+            * (np.cos(theta_rad) * Y + np.sin(theta_rad) * X)
+            / (param.lamb * param.f / param.M)
+        )
+        phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
+        phi_tem01 = phase_list[0, :, :]
 
         self.gui.phi_tem01 = phi_tem01
         self.gui.updatePhase()
@@ -349,20 +354,28 @@ class AdvancedControlPanel(QtWidgets.QWidget):
             self.tem01ThetaEdt.setText(f'{self.gui.theta_deg: .3}')
 
         else:
-            self.gui.theta_deg = float(self.tem01ThetaEdt.text()) #[m]
+            self.gui.theta_deg = float(self.tem01ThetaEdt.text())  # [m]
 
         self.gui.spacing = float(self.tem01spacingEdt.text())
-        phi_tem01 = np.zeros((param.ImgResY,param.ImgResX))
-        #P_factor = 1
+        phi_tem01 = np.zeros((param.ImgResY, param.ImgResX))
+        # P_factor = 1
         P_factor = float(self.tem01PfactorEdt.text())
-        #theta_deg = -45
-        theta_rad = self.gui.theta_deg/180*np.pi
-        x = np.arange(-param.ImgResX/2,param.ImgResX/2)*param.pslm
-        y = np.arange(-param.ImgResY/2,param.ImgResY/2)*param.pslm
-        X,Y = np.meshgrid(x,y)
-        amp_list = np.sin(-2*np.pi*0.5*self.gui.spacing*1e-6*(np.cos(theta_rad)*Y+np.sin(theta_rad)*X)/(param.lamb*param.f/param.M))
-        phase_list = np.array([amp_list >= 0])*np.pi*P_factor
-        phi_tem01 = phase_list[0,:,:]
+        # theta_deg = -45
+        theta_rad = self.gui.theta_deg / 180 * np.pi
+        x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
+        y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
+        X, Y = np.meshgrid(x, y)
+        amp_list = np.sin(
+            -2
+            * np.pi
+            * 0.5
+            * self.gui.spacing
+            * 1e-6
+            * (np.cos(theta_rad) * Y + np.sin(theta_rad) * X)
+            / (param.lamb * param.f / param.M)
+        )
+        phase_list = np.array([amp_list >= 0]) * np.pi * P_factor
+        phi_tem01 = phase_list[0, :, :]
 
         self.gui.phi_tem01 = phi_tem01
         self.gui.updatePhase()
@@ -377,19 +390,19 @@ class AdvancedControlPanel(QtWidgets.QWidget):
             self.SOrpiEdt.setText(f'{self.gui.r_pi:.2f}')
 
         else:
-            self.gui.r_pi = float(self.SOrpiEdt.text()) #[unitless]
+            self.gui.r_pi = float(self.SOrpiEdt.text())  # [unitless]
 
-        SO_x0 = float(self.SOCenterEdt_x0.text())*1e-3 #[m]
-        SO_y0 = float(self.SOCenterEdt_y0.text())*1e-3 #[m]
+        SO_x0 = float(self.SOCenterEdt_x0.text()) * 1e-3  # [m]
+        SO_y0 = float(self.SOCenterEdt_y0.text()) * 1e-3  # [m]
         r_pi = self.gui.r_pi
-        phi_SO = np.zeros((param.ImgResY,param.ImgResX))
+        phi_SO = np.zeros((param.ImgResY, param.ImgResX))
         P_factor = float(self.SOPfactorEdt.text())
-        x = np.arange(-param.ImgResX/2,param.ImgResX/2)*param.pslm
-        y = np.arange(-param.ImgResY/2,param.ImgResY/2)*param.pslm
-        X,Y = np.meshgrid(x,y)
-        Rho = ((X-SO_x0)**2 + (Y-SO_y0)**2)**0.5
-        phase_list = np.array([Rho <= r_pi*param.ImgResY/2*param.pslm])*np.pi*P_factor
-        phi_SO = phase_list[0,:,:]
+        x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
+        y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
+        X, Y = np.meshgrid(x, y)
+        Rho = ((X - SO_x0) ** 2 + (Y - SO_y0) ** 2) ** 0.5
+        phase_list = np.array([Rho <= r_pi * param.ImgResY / 2 * param.pslm]) * np.pi * P_factor
+        phi_SO = phase_list[0, :, :]
 
         self.gui.phi_SO = phi_SO
         self.gui.updatePhase()
@@ -400,17 +413,17 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         Make a spiral phase patten from 0 to 2 pi corresponding to the polar angle.
         '''
 
-        LG_x0 = float(self.LGCenterEdt_x0.text())*1e-3 #[m]
-        LG_y0 = float(self.LGCenterEdt_y0.text())*1e-3 #[m]
+        LG_x0 = float(self.LGCenterEdt_x0.text()) * 1e-3  # [m]
+        LG_y0 = float(self.LGCenterEdt_y0.text()) * 1e-3  # [m]
 
-        phi_LG = np.zeros((param.ImgResY,param.ImgResX))
+        phi_LG = np.zeros((param.ImgResY, param.ImgResX))
         P_factor = float(self.LGPfactorEdt.text())
-        x = np.arange(-param.ImgResX/2,param.ImgResX/2)*param.pslm
-        y = np.arange(-param.ImgResY/2,param.ImgResY/2)*param.pslm
-        X,Y = np.meshgrid(x,y)
-        Theta = np.arctan2((Y-LG_y0),(X-LG_x0)) + np.pi
-        phase_list = Theta*P_factor
-        phi_LG = phase_list#[0,:,:]
+        x = np.arange(-param.ImgResX / 2, param.ImgResX / 2) * param.pslm
+        y = np.arange(-param.ImgResY / 2, param.ImgResY / 2) * param.pslm
+        X, Y = np.meshgrid(x, y)
+        Theta = np.arctan2((Y - LG_y0), (X - LG_x0)) + np.pi
+        phase_list = Theta * P_factor
+        phi_LG = phase_list  # [0,:,:]
 
         self.gui.phi_LG = phi_LG
         self.gui.updatePhase()
@@ -428,6 +441,14 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         if self.gui.angularM == 0:
             image = np.zeros([param.ImgResY, param.ImgResX])
         else:
-            image = np.angle(np.exp((self.gui.angularM*np.angle((self.gui.X - self.gui.ImgCenterX) + (self.gui.Y - self.gui.ImgCenterY)*1j))*1j))
+            image = np.angle(
+                np.exp(
+                    (
+                        self.gui.angularM
+                        * np.angle((self.gui.X - self.gui.ImgCenterX) + (self.gui.Y - self.gui.ImgCenterY) * 1j)
+                    )
+                    * 1j
+                )
+            )
 
         return image

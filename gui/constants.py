@@ -1,4 +1,5 @@
 """Paths and numeric constants for the SLM GUI."""
+
 import os
 
 import numpy as np
@@ -12,9 +13,7 @@ PUPIL_VERTICAL_OFFSET = 0
 N_Zernike = 15
 SLM_DIFFRACTION_EFFICIENCY_HWHM = 90e-6
 position_to_step_per_pixel = 2 * np.pi / param.lamb * (param.M / param.f) * param.pslm
-position_to_step_per_pixel_for_z = (
-    (np.pi) / param.lamb * (param.M / param.f) ** 2 * (param.pslm ** 2)
-)
+position_to_step_per_pixel_for_z = (np.pi) / param.lamb * (param.M / param.f) ** 2 * (param.pslm**2)
 
 LOCAL_DIR = _SLM_SOFTWARE_DIR
 SLM_PATTERNS_DIR = os.path.join(LOCAL_DIR, "SLM_patterns")

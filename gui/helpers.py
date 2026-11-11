@@ -1,4 +1,5 @@
 """Shared GUI helpers."""
+
 import ast
 import os
 import re
@@ -22,8 +23,7 @@ def load_sh_correction_phase_file(ny, nx):
     print(
         "SH_correction.npy shape",
         arr.shape,
-        "does not match SLM (%d, %d); Shack–Hartmann correction disabled until fixed."
-        % (ny, nx),
+        "does not match SLM (%d, %d); Shack–Hartmann correction disabled until fixed." % (ny, nx),
     )
     return out
 
@@ -74,9 +74,7 @@ def framed_panel(inner_widget):
     frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
     frame.setFrameShadow(QtWidgets.QFrame.Plain)
     frame.setLineWidth(1)
-    frame.setStyleSheet(
-        "#slm_panel_frame { border: 1px solid #8a8a8a; border-radius: 4px; background: transparent; }"
-    )
+    frame.setStyleSheet("#slm_panel_frame { border: 1px solid #8a8a8a; border-radius: 4px; background: transparent; }")
     lay = QtWidgets.QVBoxLayout(frame)
     lay.setContentsMargins(6, 6, 6, 6)
     lay.setSpacing(0)
@@ -89,9 +87,7 @@ def register_windows_taskbar_app_id():
     if sys.platform == "win32":
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "Petanque.SLMController.GUI.1"
-        )
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Petanque.SLMController.GUI.1")
 
 
 def application_icon(base_dir=None):
@@ -107,19 +103,13 @@ def parse_launch_args(argv=None):
 
     parser = argparse.ArgumentParser(description="SLM Controller Petanque")
     parser.add_argument(
-        "--simulate",
-        action="store_true",
-        help="Run without Blink SDK / SLM hardware (patterns stay in memory).",
+        "--simulate", action="store_true", help="Run without Blink SDK / SLM hardware (patterns stay in memory)."
     )
     parser.add_argument(
-        "--no-hero",
-        action="store_true",
-        help="Do not expose the GUI as a HERO (remote grating / Zernike control).",
+        "--no-hero", action="store_true", help="Do not expose the GUI as a HERO (remote grating / Zernike control)."
     )
     parser.add_argument(
-        "--hero-name",
-        default=None,
-        help="HERO name (default: SLM_Controller, SLM_Controller_sim with --simulate).",
+        "--hero-name", default=None, help="HERO name (default: SLM_Controller, SLM_Controller_sim with --simulate)."
     )
     args, _unknown = parser.parse_known_args(argv)
     return args

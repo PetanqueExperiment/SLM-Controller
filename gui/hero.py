@@ -156,10 +156,7 @@ class SLMHero(LocalHERO):
         return [float(self._gui.dx), float(self._gui.dy)]
 
     def _zernike_dict(self):
-        return {
-            label: float(v)
-            for label, v in zip(self._gui.aberration_label_list, self._gui.aberration_values)
-        }
+        return {label: float(v) for label, v in zip(self._gui.aberration_label_list, self._gui.aberration_values)}
 
     def _set_zernike(self, coefficients):
         labels = list(self._gui.aberration_label_list)

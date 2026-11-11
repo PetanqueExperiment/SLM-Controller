@@ -1,4 +1,5 @@
 """Stdout/stderr tee into a QPlainTextEdit."""
+
 from PyQt5.QtCore import pyqtSignal
 from pyqtgraph.Qt import QtCore, QtGui
 
