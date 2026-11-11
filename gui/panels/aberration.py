@@ -39,6 +39,11 @@ class AberrationControlPanel(QtWidgets.QWidget):
         self.label_Abberation_control_layout.setAlignment(QtCore.Qt.AlignCenter)
         self.Abberation_control_layout.addWidget(self.label_Abberation_control_layout, row=0, colspan=4)
 
+        # Switches the Zernike correction on / off in updatePhase (state stored in the profile: corrections.aberration).
+        self.zernikeCorrectionChkBx = QtWidgets.QCheckBox("Aberration control")
+        self.Abberation_control_layout.addWidget(self.zernikeCorrectionChkBx, row=1, col=0, colspan=4)
+        self.zernikeCorrectionChkBx.stateChanged.connect(self.gui.updatePhase)
+
         labels = list(self.gui.aberration_label_list)
         n_primary = int(getattr(self.gui, "aberration_n_primary", 8))
         # Defocus sits above the column headers; remaining 1st-order terms go left.
@@ -58,21 +63,21 @@ class AberrationControlPanel(QtWidgets.QWidget):
             self.aber_lineEdit_list.append(lineEdit)
 
         # Defocus above "1st order" / "2nd order"
-        _add_aber_field(defocus_name, row=1, label_col=0, edit_col=1)
+        _add_aber_field(defocus_name, row=2, label_col=0, edit_col=1)
 
         hdr_l = QtWidgets.QLabel("1st order")
         hdr_l.setAlignment(QtCore.Qt.AlignCenter)
         hdr_r = QtWidgets.QLabel("2nd order")
         hdr_r.setAlignment(QtCore.Qt.AlignCenter)
-        self.Abberation_control_layout.addWidget(hdr_l, row=2, col=0, colspan=2)
-        self.Abberation_control_layout.addWidget(hdr_r, row=2, col=2, colspan=2)
+        self.Abberation_control_layout.addWidget(hdr_l, row=3, col=0, colspan=2)
+        self.Abberation_control_layout.addWidget(hdr_r, row=3, col=2, colspan=2)
 
         for i, aberration_name in enumerate(primary):
-            _add_aber_field(aberration_name, row=3 + i, label_col=0, edit_col=1)
+            _add_aber_field(aberration_name, row=4 + i, label_col=0, edit_col=1)
         for i, aberration_name in enumerate(second):
-            _add_aber_field(aberration_name, row=3 + i, label_col=2, edit_col=3)
+            _add_aber_field(aberration_name, row=4 + i, label_col=2, edit_col=3)
 
-        _btn_row = 3 + max(len(primary), len(second), 1)
+        _btn_row = 4 + max(len(primary), len(second), 1)
         self.loadDefaultZernikeCoeffsBtn = QtWidgets.QPushButton("Load default coefficients")
         self.Abberation_control_layout.addWidget(self.loadDefaultZernikeCoeffsBtn, row=_btn_row, col=0, colspan=4)
         self.loadDefaultZernikeCoeffsBtn.clicked.connect(self._load_default_zernike_coefficients_json)

@@ -38,7 +38,6 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.correctionLabel = QtWidgets.QLabel('CORRECTION')
         self.correctionLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.ManufacturerCorrectionChkBx = QtWidgets.QCheckBox('Manufacturer correction')
-        self.zernikeCorrectionChkBx = QtWidgets.QCheckBox('Aberration control')
         self.pupilLabel = QtWidgets.QLabel('PUPIL')
         self.pupilLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.pupilChkBx = QtWidgets.QCheckBox('radius (mm):')
@@ -102,7 +101,6 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         self.Advanced_control_layout.addWidget(self.label_Advanced_control_layout, row=0, colspan=3)
         self.Advanced_control_layout.addWidget(self.correctionLabel, row=23, col=0)
         self.Advanced_control_layout.addWidget(self.ManufacturerCorrectionChkBx, row=23, col=1)
-        self.Advanced_control_layout.addWidget(self.zernikeCorrectionChkBx, row=23, col=2)
         self.Advanced_control_layout.addWidget(self.pupilLabel, row=25, col=0)
         self.Advanced_control_layout.addWidget(self.pupilChkBx, row=25, col=1)
         self.Advanced_control_layout.addWidget(self.pupilEdt, row=25, col=2)
@@ -139,7 +137,6 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         # self.Advanced_control_layout.addWidget(self.LGCenterEdt_y0, row=66, col=3)
 
         self.ManufacturerCorrectionChkBx.stateChanged.connect(self.gui.updatePhase)
-        self.zernikeCorrectionChkBx.stateChanged.connect(self.gui.updatePhase)
         self.pupilChkBx.stateChanged.connect(self.calculatePupil)
         self.pupilEdt.returnPressed.connect(self.calculatePupil)
         self.pupilCenterEdt_x0.returnPressed.connect(self.calculatePupil)

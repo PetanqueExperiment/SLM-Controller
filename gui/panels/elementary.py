@@ -54,14 +54,14 @@ class ElementaryControlPanel(QtWidgets.QWidget):
         self.paramWavelengthLabel = QtWidgets.QLabel('Wavelength (nm)')
         self.paramWavelengthEdit = MyQtLineEdit("")
 
-        self.w6.addWidget(self.label_w6, row=0, colspan=4)
+        self.w6.addWidget(self.label_w6, row=0, colspan=3)
         self.w6.addWidget(self.positionLabel, row=1, col=0)
         self.w6.addWidget(self.position_xEdt, row=1, col=1)
         self.w6.addWidget(self.position_yEdt, row=1, col=2)
         self.w6.addWidget(self.paramPLabel, row=2, col=0)
         self.w6.addWidget(self.paramPEdt, row=2, col=1)
-        self.w6.addWidget(self.paramWavelengthLabel, row=2, col=2)
-        self.w6.addWidget(self.paramWavelengthEdit, row=2, col=3)
+        self.w6.addWidget(self.paramWavelengthLabel, row=3, col=0)
+        self.w6.addWidget(self.paramWavelengthEdit, row=3, col=1)
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
         # self.upBtn.clicked.connect(self.moveUp)

@@ -41,6 +41,11 @@ if TYPE_CHECKING:
 OUTPUT_HEIGHT_FRACTION: float = 0.10
 SLM_INFO_HEIGHT_FRACTION: float = 0.02
 
+# Width split of the central panels: left column (Elementary / Advanced / Aberration) and right column
+# (Arbitrary Arrays / Preview). Panels never shrink below their minimum width.
+CENTRAL_LEFT_WIDTH_FRACTION: float = 0.20
+CENTRAL_RIGHT_WIDTH_FRACTION: float = 1.0 - CENTRAL_LEFT_WIDTH_FRACTION
+
 # Gap between panels [px]: between the left-column panels, between the docks (splitter handles), to the window edges
 # (left, right, bottom, below the top menu)
 # and between the profile / SLM panels of the info strip.
@@ -358,6 +363,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"Connected to {name}")
         self._checkSerial(device, slm.serial)
         self._loadFactoryLut(device)
+        self._updateCorrectionControls()
         self.updatePhase()
         return True
 
@@ -384,6 +390,7 @@ class SLMGUI(QtWidgets.QMainWindow):
                 reason = f"factory LUT {name!r} could not be loaded ({e})"
         print(f"{label}: {reason}; frames are sent without manufacturer correction")
         QtWidgets.QMessageBox.warning(self, "No factory LUT", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set factory LUT…")
+
     def _confirmSerialOverwrite(self, board: int, expected: int, actual: int) -> bool:
         """Serial number mismatch while connecting (before anything is sent to the SLM). Yes: overwrite it in devices.json and connect; No: abort."""
         text = f"The SLM on board {board} is not the one in the device list:\n\n    expected serial number {expected}\n    found serial number {actual}\n\nYes: overwrite the serial number in the device list with {actual} and connect.\nNo: abort the connection (nothing is sent to the SLM)."
@@ -420,6 +427,16 @@ class SLMGUI(QtWidgets.QMainWindow):
         slm_info = getattr(self, "_slm_info", None)
         if slm_info is not None:
             slm_info.update()
+        self._updateCorrectionControls()
+
+    def _updateCorrectionControls(self) -> None:
+        """Manufacturer correction can only be switched while a factory LUT is loaded (never for the Simulated SLM)."""
+        box = getattr(self, "_ManufacturerCorrectionChkBx", None)
+        if box is None:
+            return
+        available = self.factory_lut is not None
+        box.setEnabled(available)
+        box.setToolTip("" if available else "No factory LUT loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set factory LUT…)")
 
     def isSLMConnected(self) -> bool:
         """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
@@ -611,6 +628,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"{label}: factory LUT set to {name!r} ({target})")
         if self.isSLMConnected() and self.board == board:
             self.factory_lut = pattern
+            self._updateCorrectionControls()
             self.updatePhase()
             print(f"{label}: new factory LUT applied")
 
@@ -936,24 +954,27 @@ class SLMGUI(QtWidgets.QMainWindow):
         elem_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
         left_lay.addWidget(elem_frame)
 
+        # Advanced and Aberration controls share one framed panel (Advanced on top).
         self._advanced = AdvancedControlPanel(self)
-        adv_frame = framed_panel(self._advanced)
-        adv_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
-        left_lay.addWidget(adv_frame)
+        self.aberration = AberrationControlPanel(self)
+        adv_aber = QtWidgets.QWidget()
+        adv_aber_lay = QtWidgets.QVBoxLayout(adv_aber)
+        adv_aber_lay.setContentsMargins(0, 0, 0, 0)
+        adv_aber_lay.setSpacing(PANEL_GAP_PX)
+        adv_aber_lay.addWidget(self._advanced)
+        adv_aber_lay.addWidget(self.aberration)
+        adv_aber_frame = framed_panel(adv_aber)
+        adv_aber_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+        left_lay.addWidget(adv_aber_frame)
+        left_lay.addStretch(1)
         # Aliases for updatePhase / cross-panel reads
         self._ManufacturerCorrectionChkBx = self._advanced.ManufacturerCorrectionChkBx
-        self._zernikeCorrectionChkBx = self._advanced.zernikeCorrectionChkBx
+        self._zernikeCorrectionChkBx = self.aberration.zernikeCorrectionChkBx
         self._pupilChkBx = self._advanced.pupilChkBx
         self.pupilEdt = self._advanced.pupilEdt
         self.pupilCenterEdt_x0 = self._advanced.pupilCenterEdt_x0
         self.pupilCenterEdt_y0 = self._advanced.pupilCenterEdt_y0
         self.pupilOutLineEdit = self._advanced.pupilOutLineEdit
-
-        self.aberration = AberrationControlPanel(self)
-        aber_frame = framed_panel(self.aberration)
-        aber_frame.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
-        left_lay.addWidget(aber_frame)
-        left_lay.addStretch(1)
 
         self.aber_lineEdit_list = self.aberration.aber_lineEdit_list
 
@@ -964,6 +985,8 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._preview = LastSentPreviewPanel(self)
         self._global_layout.addWidget(framed_panel(self._preview), row=1, col=1)
+        self._global_layout.layout.setColumnStretch(0, round(100 * CENTRAL_LEFT_WIDTH_FRACTION))
+        self._global_layout.layout.setColumnStretch(1, round(100 * CENTRAL_RIGHT_WIDTH_FRACTION))
         self._last_sent_plot = self._preview.last_sent_plot
         self._last_sent_img_item = self._preview.last_sent_img_item
         self._last_sent_colorbar = self._preview.last_sent_colorbar
