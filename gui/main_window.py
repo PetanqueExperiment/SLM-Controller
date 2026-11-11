@@ -13,9 +13,8 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
-from SLM_device import SLMDevice
-from libslm.slm import SerialMismatchError
-from gui.constants import DEFAULT_SLM, position_to_step_per_pixel
+from libslm.slm import MeadowlarkSLM, SerialMismatchError
+from gui.constants import position_to_step_per_pixel
 from gui.defaults import DEVICES_FILE, STARTUP_MODES
 from gui.settings import AppSettings, Device, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, parseBoard, readProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
@@ -65,9 +64,8 @@ class Rearranger(SLMMode):
 class SLMGUI(QtWidgets.QMainWindow):
     # --- Construction / device ---
     parent: Any  # optional owner passed to __init__ (only set if given)
-    _selected_SLM: str
     _simulate_slm: bool
-    SLM: Optional[SLMDevice]  # None when no SLM is connected
+    SLM: Optional[MeadowlarkSLM]  # None when no SLM is connected
     board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
     param_P: int  # gray levels per 2π (from SLM parameters)
@@ -204,13 +202,12 @@ class SLMGUI(QtWidgets.QMainWindow):
     _slm_temp_timer: QtCore.QTimer
     _temp_log_error_reported: bool
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, selected_SLM: str = DEFAULT_SLM, simulate: bool = False, start_hero: bool = False, hero_name: Optional[str] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, simulate: bool = False, start_hero: bool = False, hero_name: Optional[str] = None) -> None:
         super(SLMGUI, self).__init__()
 
         if parent:
             self.parent = parent
 
-        self._selected_SLM = selected_SLM
         self._simulate_slm = bool(simulate)
         self._remote_control = {}
 
@@ -333,7 +330,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         device = findDevice(board)
         expected = None if device is None else device.serial
         try:
-            slm = SLMDevice(self._selected_SLM, simulate=self._simulate_slm, board=board, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm = MeadowlarkSLM(board, simulate=self._simulate_slm, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm.connect()
         except SerialMismatchError as e:
             print(f"Connection aborted: {e} Nothing was sent to the SLM.")
             return False
@@ -345,7 +343,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.board = board
         self._updateWindowTitle()
         print(f"Connected to the SLM on board {board}")
-        self._checkSerial(device, slm.communication.serial)
+        self._checkSerial(device, slm.serial)
         self.updatePhase()
         return True
 
@@ -364,7 +362,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     def _checkSerial(self, device: Optional[Device], actual: Optional[int]) -> None:
         """After connecting: log the serial check, and record the serial of a listed device the first time it is seen."""
-        if self.SLM is not None and self.SLM.simulated:
+        if self.SLM is not None and self.SLM.simulate:
             print("Simulated SLM: no serial number to check")
         elif actual is None:
             print(f"Could not read the serial number of the SLM on board {self.board}: it was not verified")
@@ -382,7 +380,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     def _updateWindowTitle(self) -> None:
         if self.SLM is None:
             state = "no SLM connected"
-        elif self.SLM.simulated:
+        elif self.SLM.simulate:
             state = f"board {self.board}, SIMULATE — no hardware"
         else:
             state = f"board {self.board}"
@@ -390,7 +388,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     def isSLMConnected(self) -> bool:
         """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
-        return self.SLM is not None and self.SLM.communication.connected
+        return self.SLM is not None and self.SLM.connected
 
     def initPhase(self) -> None:
         """SLM coordinate grids and phase buffers (independent of whether an SLM is connected)."""
@@ -559,7 +557,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         slm, self.SLM = self.SLM, None
         if slm is not None:
             try:
-                slm.close()
+                slm.disconnect()
             except Exception as e:
                 print(f"Error while disconnecting the SLM on board {self.board}: {e}")
             print(f"Disconnected the SLM on board {self.board}")
@@ -877,7 +875,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.totalPhase = np.round(self.param_P * self.totalPhase / (2 * np.pi)).astype("uint8")
         if self.SLM is not None:
-            self.SLM.updateArray(self.totalPhase)
+            self.SLM.uploadHologram(self.totalPhase)
         self._publish_static_changes()
         self._preview._update_last_sent_preview()
 
@@ -886,7 +884,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         print("closing all")
         slm, self.SLM = getattr(self, "SLM", None), None
         if slm is not None:
-            slm.close()
+            slm.disconnect()
 
     def closeEvent(self, err: QtGui.QCloseEvent) -> None:
         try:

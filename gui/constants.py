@@ -27,7 +27,5 @@ DIR_SHARED_DETEKTOR: str = "Y:\\Public"
 MESSAGE_FILE: str = DIR_SHARED_DETEKTOR + "\\SYNC_SLM_CAM.txt"
 FILE_INTENSITY: str = DIR_SHARED_DETEKTOR + "\\file_intensity.dat"
 
-DEFAULT_SLM: str = "Meadowlark SLM"
-
 ROI_JSON_UM_PER_CAMERA_PIXEL: float = 1.0
 SYSTEM_MAGNIFICATION: float = 1.0

@@ -171,12 +171,12 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
         self.gui._slm_temp_timer.start()
 
     def _refresh_slm_temperature(self) -> None:
-        comm = getattr(getattr(self.gui, "SLM", None), "communication", None)
-        if comm is None:
+        slm = getattr(self.gui, "SLM", None)
+        if slm is None:
             self.label_slm_temperature.setText("SLM temperature: —")
             return
         try:
-            temp_c = comm.readTemperature()
+            temp_c = slm.readTemperature()
         except Exception:
             self.label_slm_temperature.setText("SLM temperature: unavailable")
             return

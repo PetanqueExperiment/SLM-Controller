@@ -21,6 +21,7 @@ from typing import Callable, ClassVar
 
 import numpy as np
 from ctypes import CDLL, POINTER, byref, c_char_p, c_double, c_int, c_ubyte, c_uint
+from PIL import Image
 
 # --- Configure ---
 # Blink_C_wrapper.dll usually lives under the Meadowlark Blink PCIe install (Program Files), not always on the USB.
@@ -28,6 +29,8 @@ from ctypes import CDLL, POINTER, byref, c_char_p, c_double, c_int, c_ubyte, c_u
 BLINK_DLL: Path = Path(r"C:\Program Files\Meadowlark Optics\Blink OverDrive Plus\SDK\Blink_C_wrapper.dll")
 # LUT: your USB stick includes e.g. 1024x1024_linearVoltage.lut — prefer the calibration shipped for your SLM.
 LUT_FILE: Path = Path(r"C:\Program Files\Meadowlark Optics\Blink OverDrive Plus\LUT Files\slm6801_at785_33C.LUT")
+# Manufacturer wavefront correction (WFC) of the same SLM head, 8-bit BMP; added to every hologram by the GUI.
+WFC_FILE: Path = Path(__file__).resolve().parent / "slm6801_at785_33C_WFC.bmp"
 
 BOARD: int = 1
 W: int = 1024
@@ -62,10 +65,12 @@ class MeadowlarkSLM:
 
     _active: ClassVar[MeadowlarkSLM | None] = None
 
-    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path = LUT_FILE, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None) -> None:
+    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path = LUT_FILE, wfc_path: Path = WFC_FILE, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None) -> None:
         self.board: int = board
         self.dll_path: Path = dll_path
         self.lut_path: Path = lut_path
+        self.wfc_path: Path = wfc_path
+        self.correction_pattern: np.ndarray | None = None
         self.simulate: bool = simulate
         self.expected_serial: int | None = expected_serial
         self.on_serial_mismatch: Callable[[int, int], bool] | None = on_serial_mismatch
@@ -84,12 +89,14 @@ class MeadowlarkSLM:
         return self._connected
 
     def connect(self) -> None:
-        """Load the DLL, Create_SDK, and Load_LUT_file. Safe to call again if already connected."""
+        """Load the WFC correction, then the DLL, Create_SDK, and Load_LUT_file. Safe to call again if already connected."""
         if self._connected:
             return
         active = MeadowlarkSLM._active
         if active is not None and active is not self:
             raise RuntimeError(f"Meadowlark SDK already in use by board {active.board}. Disconnect it first.")
+
+        self.correction_pattern = self._load_correction(self.wfc_path)
 
         if self.simulate:
             self._dll = None
@@ -210,6 +217,20 @@ class MeadowlarkSLM:
         if self._last_image is None:
             return None
         return np.array(self._last_image, copy=True)
+
+    @staticmethod
+    def _load_correction(path: Path) -> np.ndarray:
+        """Manufacturer WFC BMP as a (H, W) float32 phase map in radians (gray level × 2π / 255)."""
+        print("Manufacturer wfc path: ", path)
+        if not path.is_file():
+            raise FileNotFoundError(f"WFC correction not found: {path}")
+        with Image.open(path) as im:
+            if im.mode != "L":
+                im = im.convert("L")
+            pattern: np.ndarray = np.asarray(im, dtype=np.float32) * 2 * np.pi / 255
+        if pattern.shape != (H, W):
+            raise ValueError(f"WFC BMP {path} has shape {pattern.shape}, expected ({H}, {W})")
+        return pattern
 
     @staticmethod
     def _read_serial(dll: CDLL, board: int) -> int | None:

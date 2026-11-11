@@ -13,7 +13,7 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
   `--simulate`) and without HEROS (`--no-hero`).
 - Follow the existing architecture: entry point `GUI_SLM.py`, window in
   `gui/main_window.py`, one panel per file in `gui/panels/`, shared values in
-  `gui/constants.py`. Keep device code (`SLM_device.py`) separate from UI.
+  `gui/constants.py`. Keep device code (`libslm/slm.py`) separate from UI.
 - Never change saved file formats (`SLM_patterns/`, `Tweezer_ROIs/`,
   `Zernike_corrections/`) without a backward-compatible loader.
 - Add tests (pytest) for non-UI logic you touch, where feasible.

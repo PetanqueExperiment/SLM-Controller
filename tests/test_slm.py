@@ -86,6 +86,33 @@ def test_simulate_round_trip():
     assert not slm.connected
 
 
+def test_connect_loads_wfc_correction_in_radians():
+    slm = MeadowlarkSLM(simulate=True)
+    slm.connect()
+    try:
+        c = slm.correction_pattern
+        assert c.shape == (slm_module.H, slm_module.W) and c.dtype == np.float32
+        assert 0.0 <= c.min() and c.max() <= 2 * np.pi
+    finally:
+        slm.disconnect()
+
+
+def test_missing_wfc_fails_before_sdk(hw, tmp_path):
+    fake = FakeBlinkDLL()
+    slm = hw(fake, wfc_path=tmp_path / "missing_WFC.bmp")
+    with pytest.raises(FileNotFoundError, match="WFC"):
+        slm.connect()
+    assert fake.calls == [] and not slm.connected
+
+
+def test_wrong_size_wfc_is_rejected(tmp_path):
+    from PIL import Image
+    path = tmp_path / "small_WFC.bmp"
+    Image.fromarray(np.zeros((10, 20), dtype=np.uint8)).save(path)
+    with pytest.raises(ValueError, match="shape"):
+        MeadowlarkSLM(simulate=True, wfc_path=path).connect()
+
+
 def test_only_one_connected_instance():
     a, b = MeadowlarkSLM(simulate=True), MeadowlarkSLM(2, simulate=True)
     a.connect()
