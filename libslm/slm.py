@@ -173,11 +173,11 @@ def disconnect() -> None:
 def read_temperature(board: int = BOARD) -> float:
     """Return the SLM temperature in degrees Celsius. Requires :func:`connect` first."""
     if not _sdk_connected:
-        raise RuntimeError("Meadowlark SDK not connected. Call libslm.communication.connect() before reading temperature.")
+        raise RuntimeError("Meadowlark SDK not connected. Call libslm.slm.connect() before reading temperature.")
     if _simulate:
         return float(SIMULATED_TEMPERATURE_C)
     if _blink_dll is None:
-        raise RuntimeError("Meadowlark SDK not connected. Call libslm.communication.connect() before reading temperature.")
+        raise RuntimeError("Meadowlark SDK not connected. Call libslm.slm.connect() before reading temperature.")
     return float(_blink_dll.Read_SLM_temperature(board))
 
 
@@ -189,7 +189,7 @@ def upload_image_to_slm(image_u8: np.ndarray) -> None:
     """
     global _blink_dll, _sdk_connected, _last_image
     if not _sdk_connected:
-        raise RuntimeError("Meadowlark SDK not connected. Call libslm.communication.connect() before upload.")
+        raise RuntimeError("Meadowlark SDK not connected. Call libslm.slm.connect() before upload.")
 
     if image_u8.shape != (H, W):
         raise ValueError(f"Expected shape ({H}, {W}), got {image_u8.shape}")
@@ -201,7 +201,7 @@ def upload_image_to_slm(image_u8: np.ndarray) -> None:
         return
 
     if _blink_dll is None:
-        raise RuntimeError("Meadowlark SDK not connected. Call libslm.communication.connect() before upload.")
+        raise RuntimeError("Meadowlark SDK not connected. Call libslm.slm.connect() before upload.")
 
     dll: CDLL = _blink_dll
     flat: np.ndarray = np.ascontiguousarray(image_u8.ravel(order="C"))

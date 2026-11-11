@@ -22,7 +22,7 @@ class SLMDevice:
         if name == "Meadowlark SLM":
 
             import libslm.parameters as parameters
-            import libslm.communication as communication
+            import libslm.slm as communication
 
             _wfc = Path(__file__).resolve().parent / "libslm" / "slm6801_at785_33C_WFC.bmp"
             print("Manufacturer wfc path: ", _wfc)
@@ -56,7 +56,7 @@ class SLMDevice:
     def close(self):
         print("Closing SLM device")
         if self.name == "Meadowlark SLM":
-            import libslm.communication as communication
+            import libslm.slm as communication
 
             communication.disconnect()
         del self

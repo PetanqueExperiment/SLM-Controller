@@ -13,7 +13,7 @@ from ctypes import c_double, c_int
 
 import numpy as np
 
-import libslm.communication as comm
+import libslm.slm as comm
 import libslm.parameters as param
 
 
