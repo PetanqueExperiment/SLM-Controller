@@ -14,9 +14,10 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
 from SLM_device import SLMDevice
+from libslm.slm import SerialMismatchError
 from gui.constants import DEFAULT_SLM, position_to_step_per_pixel
-from gui.defaults import STARTUP_MODES
-from gui.settings import AppSettings, readProfile, writeProfile
+from gui.defaults import DEVICES_FILE, STARTUP_MODES
+from gui.settings import AppSettings, Device, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, parseBoard, readProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -66,7 +67,8 @@ class SLMGUI(QtWidgets.QMainWindow):
     parent: Any  # optional owner passed to __init__ (only set if given)
     _selected_SLM: str
     _simulate_slm: bool
-    SLM: SLMDevice
+    SLM: Optional[SLMDevice]  # None when no SLM is connected
+    board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
     param_P: int  # gray levels per 2π (from SLM parameters)
 
@@ -150,6 +152,8 @@ class SLMGUI(QtWidgets.QMainWindow):
     top_menu_bar: QtWidgets.QToolBar
     top_menu_buttons: dict[str, QtWidgets.QPushButton]
     _startup_mode_group: QtWidgets.QActionGroup
+    _connect_action: QtWidgets.QAction  # Device ▸ Connect… (enabled only while no SLM is connected)
+    _disconnect_action: QtWidgets.QAction  # Device ▸ Disconnect (enabled only while an SLM is connected)
 
     # --- Settings / profiles ---
     settings: AppSettings  # settings/settings.json
@@ -200,14 +204,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     _slm_temp_timer: QtCore.QTimer
     _temp_log_error_reported: bool
 
-    def __init__(
-        self,
-        parent: Optional[QtWidgets.QWidget] = None,
-        selected_SLM: str = DEFAULT_SLM,
-        simulate: bool = False,
-        start_hero: bool = False,
-        hero_name: Optional[str] = None,
-    ) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, selected_SLM: str = DEFAULT_SLM, simulate: bool = False, start_hero: bool = False, hero_name: Optional[str] = None) -> None:
         super(SLMGUI, self).__init__()
 
         if parent:
@@ -221,10 +218,14 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.settings = AppSettings.load()
         self.current_profile = self.settings.startupProfile()
+        self.board = None
+        self.SLM = None
 
         self.initUI()
-        self.initSLM()
+        self.initPhase()
         self.loadProfile(self.current_profile)
+        self._updateWindowTitle()
+        self.elementary.createGratingPattern(self.dx, self.dy)
 
         self._last_sent_plot.installEventFilter(self._preview)
         self._preview.ft_plot.installEventFilter(self._preview)
@@ -238,6 +239,15 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._hero = None
         if start_hero:
             self._start_hero(hero_name)
+
+        QtCore.QTimer.singleShot(0, self._connectAtStartup)
+
+    def _connectAtStartup(self) -> None:
+        """Last startup step, run once the window is up: connect to the SLM stored in the profile, if any."""
+        if self.board is None:
+            print("No SLM in the profile: running without an SLM (Device ▸ Connect… to connect)")
+            return
+        self.connectSLM(self.board)
 
     def _start_hero(self, name: Optional[str] = None) -> None:
         """Expose grating shift + Zernike coefficients over HEROS (optional dependency)."""
@@ -315,13 +325,76 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             print(e)
 
-    def initSLM(self) -> None:
-        self.SLM = SLMDevice(self._selected_SLM, simulate=self._simulate_slm)
+    def connectSLM(self, board: int) -> bool:
+        """Connect to the SLM on ``board`` and upload the current hologram. On failure the GUI keeps running without an SLM."""
+        if self.SLM is not None:
+            print(f"Already connected to the SLM on board {self.board}")
+            return False
+        device = findDevice(board)
+        expected = None if device is None else device.serial
+        try:
+            slm = SLMDevice(self._selected_SLM, simulate=self._simulate_slm, board=board, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+        except SerialMismatchError as e:
+            print(f"Connection aborted: {e} Nothing was sent to the SLM.")
+            return False
+        except Exception as e:
+            print(f"Could not connect to the SLM on board {board}: {e}")
+            QtWidgets.QMessageBox.warning(self, "SLM not connected", f"Could not connect to the SLM on board {board}:\n{e}\n\nThe GUI runs without an SLM.")
+            return False
+        self.SLM = slm
+        self.board = board
+        self._updateWindowTitle()
+        print(f"Connected to the SLM on board {board}")
+        self._checkSerial(device, slm.communication.serial)
+        self.updatePhase()
+        return True
 
-        if getattr(self.SLM, "simulated", False):
-            self.setWindowTitle("SLM Controller Petanque [SIMULATE — no hardware]")
+    def _confirmSerialOverwrite(self, board: int, expected: int, actual: int) -> bool:
+        """Serial number mismatch while connecting (before anything is sent to the SLM). Yes: overwrite it in devices.json and connect; No: abort."""
+        text = f"The SLM on board {board} is not the one in the device list:\n\n    expected serial number {expected}\n    found serial number {actual}\n\nYes: overwrite the serial number in the device list with {actual} and connect.\nNo: abort the connection (nothing is sent to the SLM)."
+        answer = QtWidgets.QMessageBox.warning(self, "Wrong SLM?", text, QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if answer != QtWidgets.QMessageBox.Yes:
+            return False
+        try:
+            setDeviceSerial(board, actual)
+            print(f"Serial number of board {board} overwritten in the device list: {expected} -> {actual}")
+        except OSError as e:
+            print(f"Could not write serial number {actual} to the device list (connecting anyway):", e)
+        return True
 
-        Nx, Ny = self.SLM.getSize()
+    def _checkSerial(self, device: Optional[Device], actual: Optional[int]) -> None:
+        """After connecting: log the serial check, and record the serial of a listed device the first time it is seen."""
+        if self.SLM is not None and self.SLM.simulated:
+            print("Simulated SLM: no serial number to check")
+        elif actual is None:
+            print(f"Could not read the serial number of the SLM on board {self.board}: it was not verified")
+        elif device is None:
+            print(f"SLM on board {self.board} has serial number {actual} (board not in the device list)")
+        elif device.serial is None:
+            try:
+                setDeviceSerial(device.board, actual)
+                print(f"Recorded serial number {actual} for board {device.board} in the device list")
+            except OSError as e:
+                print(f"Could not record serial number {actual} in the device list:", e)
+        elif device.serial == actual:
+            print(f"Serial number {actual} matches the device list")
+
+    def _updateWindowTitle(self) -> None:
+        if self.SLM is None:
+            state = "no SLM connected"
+        elif self.SLM.simulated:
+            state = f"board {self.board}, SIMULATE — no hardware"
+        else:
+            state = f"board {self.board}"
+        self.setWindowTitle(f"SLM Controller Petanque — profile: {self.current_profile} [{state}]")
+
+    def isSLMConnected(self) -> bool:
+        """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
+        return self.SLM is not None and self.SLM.communication.connected
+
+    def initPhase(self) -> None:
+        """SLM coordinate grids and phase buffers (independent of whether an SLM is connected)."""
+        Nx, Ny = param.ImgResX, param.ImgResY
 
         self.SLM_shape = (Ny, Nx)
 
@@ -334,7 +407,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.deltax = 1
         self.deltay = 1
         self._epsilon = 0
-        self.param_P = self.SLM.parameters.P
+        self.param_P = param.P
 
         self.phasePattern = np.zeros([param.ImgResY, param.ImgResX])
         self.im_grating = np.zeros([param.ImgResY, param.ImgResX])
@@ -353,9 +426,6 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.zernike_polynomials = np.asarray(__zernikepolynomials__(self._zernike_r, self._zernike_theta))
         self.zernike_polynomials[:, self._zernike_r > 1] = 0
         self.zernike_polynomials *= 2 * np.pi
-
-        self.elementary.createGratingPattern(self.dx, self.dy)
-        self.updatePhase()
 
     def initUI(self) -> None:
         self.dx = 0
@@ -445,17 +515,108 @@ class SLMGUI(QtWidgets.QMainWindow):
         bar.setContextMenuPolicy(QtCore.Qt.PreventContextMenu)
 
         self.top_menu_buttons = {}
-        for label in ("Device", "Settings"):
+        for label in ("Device", "Profiles", "Settings"):
             btn = QtWidgets.QPushButton(label)
             btn.setFixedSize(90, self.TOP_MENU_HEIGHT - 6)
             bar.addWidget(btn)
             self.top_menu_buttons[label] = btn
 
-        self.top_menu_buttons["Device"].clicked.connect(lambda _checked=False: print("[menu] Device: not implemented"))
+        self.top_menu_buttons["Device"].setMenu(self._create_devices_menu())
+        self.top_menu_buttons["Profiles"].setMenu(self._create_profiles_menu())
         self.top_menu_buttons["Settings"].setMenu(self._create_settings_menu())
 
         self.addToolBar(QtCore.Qt.TopToolBarArea, bar)
         self.top_menu_bar = bar
+
+    def _create_devices_menu(self) -> QtWidgets.QMenu:
+        """Device drop-down: the SLM list stored in devices/devices.json."""
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("View devices").triggered.connect(lambda _checked=False: self._showDevices())
+        menu.addAction("Add device").triggered.connect(lambda _checked=False: self._addDeviceDialog())
+        menu.addSeparator()
+        self._connect_action = menu.addAction("Connect…")
+        self._connect_action.triggered.connect(lambda _checked=False: self._connectDialog())
+        self._disconnect_action = menu.addAction("Disconnect")
+        self._disconnect_action.triggered.connect(lambda _checked=False: self._disconnectClicked())
+        menu.aboutToShow.connect(self._updateDeviceActions)
+        return menu
+
+    def _updateDeviceActions(self) -> None:
+        self._connect_action.setEnabled(self.SLM is None)
+        self._disconnect_action.setEnabled(self.SLM is not None)
+
+    def _disconnectClicked(self) -> None:
+        """Device ▸ Disconnect: close the SLM session after confirmation; the GUI keeps running without an SLM."""
+        if self.SLM is None:
+            return
+        text = f"Disconnect the SLM on board {self.board}?\n\nHolograms will no longer be sent until you connect again (Device ▸ Connect…)."
+        if QtWidgets.QMessageBox.question(self, "Disconnect", text) != QtWidgets.QMessageBox.Yes:
+            return
+        self.disconnectSLM()
+
+    def disconnectSLM(self) -> None:
+        """Close the SLM session. ``self.board`` is kept, so the profile and Device ▸ Connect… still refer to it."""
+        slm, self.SLM = self.SLM, None
+        if slm is not None:
+            try:
+                slm.close()
+            except Exception as e:
+                print(f"Error while disconnecting the SLM on board {self.board}: {e}")
+            print(f"Disconnected the SLM on board {self.board}")
+        self._updateWindowTitle()
+
+    @staticmethod
+    def _boardLabel(board: int) -> str:
+        return f"Board {board}"
+
+    @classmethod
+    def _deviceLabel(cls, device: Device) -> str:
+        return f"{cls._boardLabel(device.board)}  (SN {'not known yet' if device.serial is None else device.serial})"
+
+    def _showDevices(self) -> None:
+        devices = loadDevices()
+        boards = [d.board for d in devices]
+        if devices:
+            lines = [self._deviceLabel(d) + ("   ← connected" if self.SLM is not None and d.board == self.board else "") for d in devices]
+            text = "\n".join(lines)
+        else:
+            text = "No SLM in the device list yet.\nUse Device ▸ Add device."
+        if self.SLM is not None and self.board not in boards:
+            text += f"\n\nConnected: {self._boardLabel(self.board)} (not in the list)"
+        QtWidgets.QMessageBox.information(self, "Devices", f"{text}\n\nThe serial number is recorded the first time a device is connected.\nList file: {DEVICES_FILE}")
+
+    def _addDeviceDialog(self) -> Optional[int]:
+        """Ask for a board number and add it to devices.json; return the board, or None if cancelled."""
+        boards = [d.board for d in loadDevices()]
+        suggestion = next(b for b in range(1, len(boards) + 2) if b not in boards)
+        board, ok = QtWidgets.QInputDialog.getInt(self, "Add device", "Board number of the SLM:", suggestion, 1, 99)
+        if not ok:
+            return None
+        try:
+            added = addDevice(board)
+        except OSError as e:
+            print("Could not save the device list:", e)
+            QtWidgets.QMessageBox.warning(self, "Add device", f"Could not save the device list:\n{e}")
+            return None
+        print(f"Added {self._boardLabel(board)} to the device list" if added else f"{self._boardLabel(board)} is already in the device list")
+        return board
+
+    def _connectDialog(self) -> None:
+        """Device ▸ Connect…: choose an SLM from the device list and connect to it."""
+        if self.SLM is not None:
+            return
+        devices = loadDevices()
+        boards = [d.board for d in devices]
+        if not boards:
+            answer = QtWidgets.QMessageBox.question(self, "Connect", "No SLM is in the device list yet.\nAdd one now?")
+            board = self._addDeviceDialog() if answer == QtWidgets.QMessageBox.Yes else None
+        else:
+            labels = [self._deviceLabel(d) for d in devices]
+            current = boards.index(self.board) if self.board in boards else 0
+            label, ok = QtWidgets.QInputDialog.getItem(self, "Connect", "SLM to connect to:", labels, current, False)
+            board = boards[labels.index(label)] if ok else None
+        if board is not None:
+            self.connectSLM(board)
 
     def _create_settings_menu(self) -> QtWidgets.QMenu:
         """Settings drop-down: which profile is loaded when the app starts (stored in settings.json)."""
@@ -482,11 +643,14 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"Startup profile: {STARTUP_MODES[self.settings.startup_mode]}")
 
     def profileParams(self) -> dict[str, Any]:
-        """Parameters stored in a profile file (none yet)."""
-        return {}
+        """Parameters stored in a profile file."""
+        return {} if self.board is None else {"board": self.board}
 
     def applyProfile(self, params: dict[str, Any]) -> None:
-        """Apply parameters read from a profile file (none yet)."""
+        """Apply parameters read from a profile file."""
+        self.board = parseBoard(params.get("board"))
+        if "board" in params and self.board is None:
+            print(f"Ignoring invalid board {params['board']!r} in profile {self.current_profile!r}")
 
     def loadProfile(self, name: str) -> None:
         """Load ``profiles/<name>.json`` (if it exists) and make it the active profile."""
@@ -501,6 +665,89 @@ class SLMGUI(QtWidgets.QMainWindow):
     def saveProfile(self, name: Optional[str] = None) -> Path:
         """Write ``profileParams()`` to ``profiles/<name>.json`` (default: active profile) and return the path."""
         return writeProfile(name or self.current_profile, self.profileParams())
+
+    def _create_profiles_menu(self) -> QtWidgets.QMenu:
+        """Profiles drop-down: load, save and duplicate the profiles in profiles/."""
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Load…").triggered.connect(lambda _checked=False: self._loadProfileDialog())
+        menu.addAction("Save").triggered.connect(lambda _checked=False: self._saveProfileClicked())
+        menu.addAction("Duplicate…").triggered.connect(lambda _checked=False: self._duplicateProfileDialog())
+        return menu
+
+    def _chooseProfile(self, title: str, label: str) -> Optional[str]:
+        """Pick a profile name from profiles/ (the active one is always listed and preselected)."""
+        names = sorted(set(listProfiles()) | {self.current_profile})
+        name, ok = QtWidgets.QInputDialog.getItem(self, title, label, names, names.index(self.current_profile), False)
+        return name if ok else None
+
+    def _saveProfileClicked(self) -> None:
+        try:
+            path = self.saveProfile()
+        except OSError as e:
+            print("Could not save the profile:", e)
+            QtWidgets.QMessageBox.warning(self, "Save profile", f"Could not save profile {self.current_profile!r}:\n{e}")
+            return
+        print(f"Saved profile {self.current_profile!r}: {path}")
+
+    def _loadProfileDialog(self) -> None:
+        """Profiles ▸ Load…: make another profile active. Never changes the SLM connection: a profile for another SLM is refused."""
+        name = self._chooseProfile("Load profile", "Profile to load:")
+        if name is None:
+            return
+        params = readProfile(name)
+        if params is None:
+            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} has no saved file yet.")
+            return
+        board = parseBoard(params.get("board"))
+        connected = self.isSLMConnected()
+        if connected and board is not None and board != self.board:
+            print(f"Profile {name!r} not loaded: it is for board {board}, the connected SLM is on board {self.board}")
+            QtWidgets.QMessageBox.warning(self, "Load profile", f"Profile {name!r} is for the SLM on board {board}, but the connected SLM is on board {self.board}.\n\nOnly profiles for the connected SLM can be loaded.")
+            return
+        try:
+            self.saveProfile()
+        except OSError as e:
+            print(f"Could not save profile {self.current_profile!r} before loading {name!r}:", e)
+        connected_board = self.board
+        self.current_profile = name
+        self.applyProfile(params)
+        if connected:
+            self.board = connected_board
+        self.settings.last_profile = name
+        try:
+            self.settings.save()
+        except OSError as e:
+            print("Could not save settings:", e)
+        self._updateWindowTitle()
+        hint = "" if connected or self.board is None else f" (board {self.board}: Device ▸ Connect… to connect)"
+        print(f"Loaded profile {name!r}{hint}")
+
+    def _duplicateProfileDialog(self) -> None:
+        """Profiles ▸ Duplicate…: copy an existing profile to a new name (the active one is copied with its current values)."""
+        source = self._chooseProfile("Duplicate profile", "Profile to copy:")
+        if source is None:
+            return
+        target, ok = QtWidgets.QInputDialog.getText(self, "Duplicate profile", f"Name of the copy of {source!r}:", QtWidgets.QLineEdit.Normal, f"{source}_copy")
+        if not ok:
+            return
+        target = target.strip()
+        if not isValidProfileName(target):
+            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"{target!r} is not a valid name.\nUse letters, digits, spaces, '-' or '_'.")
+            return
+        if target in listProfiles():
+            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Profile {target!r} already exists.")
+            return
+        params = self.profileParams() if source == self.current_profile else readProfile(source)
+        if params is None:
+            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Profile {source!r} has no saved file.")
+            return
+        try:
+            path = writeProfile(target, params)
+        except OSError as e:
+            print("Could not write the profile copy:", e)
+            QtWidgets.QMessageBox.warning(self, "Duplicate profile", f"Could not write {target!r}:\n{e}")
+            return
+        print(f"Copied profile {source!r} to {target!r}: {path}")
 
     def createDocks(self) -> None:
         self._d1 = dockarea.Dock("All", size=(700, 700))
@@ -619,7 +866,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     def updatePhase(self) -> None:
         self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
 
-        if self._ManufacturerCorrectionChkBx.isChecked():
+        if self._ManufacturerCorrectionChkBx.isChecked() and self.SLM is not None:
             self.totalPhase = self.totalPhase + self.SLM.correction_pattern
         if self._zernikeCorrectionChkBx.isChecked():
             self.totalPhase = self.totalPhase + self.im_zernike
@@ -629,16 +876,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.totalPhase = np.mod(self.totalPhase, 2 * np.pi)
 
         self.totalPhase = np.round(self.param_P * self.totalPhase / (2 * np.pi)).astype("uint8")
-        self.SLM.updateArray(self.totalPhase)
+        if self.SLM is not None:
+            self.SLM.updateArray(self.totalPhase)
         self._publish_static_changes()
         self._preview._update_last_sent_preview()
 
     def __del__(self) -> None:
         plt.close("all")
         print("closing all")
-        self.SLM.close()
-        del self.SLM
-        del self
+        slm, self.SLM = getattr(self, "SLM", None), None
+        if slm is not None:
+            slm.close()
 
     def closeEvent(self, err: QtGui.QCloseEvent) -> None:
         try:

@@ -5,7 +5,7 @@ from PIL import Image
 
 
 class SLMDevice:
-    def __init__(self, name='No name given', simulate=False):
+    def __init__(self, name='No name given', simulate=False, board=1, expected_serial=None, on_serial_mismatch=None):
         """
         Parameters
         ----------
@@ -14,9 +14,17 @@ class SLMDevice:
         simulate
             If True, use the offline stub (no Blink SDK / hardware).
             Default False: connect to real hardware (raises on failure).
+        board
+            Blink PCIe board number the SLM is connected to (1 = first board).
+        expected_serial
+            If given, the serial number of the SLM on ``board`` is checked before the LUT is loaded.
+        on_serial_mismatch
+            Called as ``on_serial_mismatch(expected, actual)`` on a mismatch: True continues connecting,
+            False (or None) aborts with libslm.slm.SerialMismatchError.
         """
         self.name = name
         self.simulated = bool(simulate)
+        self.board = int(board)
         self.updateArray = self._update_array_placeholder
 
         if name == "Meadowlark SLM":
@@ -39,7 +47,7 @@ class SLMDevice:
                 )
 
             self.parameters = parameters
-            self.communication = MeadowlarkSLM(simulate=self.simulated)
+            self.communication = MeadowlarkSLM(self.board, simulate=self.simulated, expected_serial=expected_serial, on_serial_mismatch=on_serial_mismatch)
             self.communication.connect()
             self.updateArray = self.communication.uploadHologram
 

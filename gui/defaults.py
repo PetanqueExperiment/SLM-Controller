@@ -12,6 +12,7 @@ PROFILE_DIR: Path = SLM_DIR / 'profiles'
 SETTINGS_DIR: Path = SLM_DIR / 'settings'
 
 SETTINGS_FILE: Path = SETTINGS_DIR / 'settings.json'
+DEVICES_FILE: Path = DEVICES_DIR / 'devices.json'
 
 DEFAULT_PROFILE: str = 'default'
 

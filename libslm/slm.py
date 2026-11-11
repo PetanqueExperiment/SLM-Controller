@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import ClassVar
+from typing import Callable, ClassVar
 
 import numpy as np
 from ctypes import CDLL, POINTER, byref, c_char_p, c_double, c_int, c_ubyte, c_uint
@@ -39,20 +39,37 @@ TRIGGER_TIMEOUT_MS: int = 5000
 SIMULATED_TEMPERATURE_C: float = 33.0
 
 
+class SerialMismatchError(RuntimeError):
+    """The SLM found on the board is not the one expected (different serial number)."""
+
+    def __init__(self, board: int, expected: int, actual: int) -> None:
+        super().__init__(f"Board {board}: expected SLM serial number {expected}, found {actual}.")
+        self.board: int = board
+        self.expected: int = expected
+        self.actual: int = actual
+
+
 class MeadowlarkSLM:
     """One Meadowlark SLM on a Blink PCIe board.
 
     The Blink SDK is a single instance per process (Create_SDK / Delete_SDK are global in the DLL),
     so only one MeadowlarkSLM may be connected at a time.
+
+    If ``expected_serial`` is given, :meth:`connect` reads the serial number right after Create_SDK, before the LUT
+    or any image reaches the SLM. On a mismatch it calls ``on_serial_mismatch(expected, actual)``: True continues
+    connecting, False (or no callback) closes the SDK again and raises SerialMismatchError.
     """
 
     _active: ClassVar[MeadowlarkSLM | None] = None
 
-    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path = LUT_FILE, simulate: bool = False) -> None:
+    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path = LUT_FILE, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None) -> None:
         self.board: int = board
         self.dll_path: Path = dll_path
         self.lut_path: Path = lut_path
         self.simulate: bool = simulate
+        self.expected_serial: int | None = expected_serial
+        self.on_serial_mismatch: Callable[[int, int], bool] | None = on_serial_mismatch
+        self.serial: int | None = None
         self._dll: CDLL | None = None
         self._connected: bool = False
         self._last_image: np.ndarray | None = None
@@ -77,6 +94,7 @@ class MeadowlarkSLM:
         if self.simulate:
             self._dll = None
             self._last_image = None
+            self.serial = None
             self._connected = True
             MeadowlarkSLM._active = self
             print("Meadowlark SLM: SIMULATE mode (no Blink SDK / hardware). Phase patterns are kept in memory only.")
@@ -101,6 +119,11 @@ class MeadowlarkSLM:
             if not 1 <= self.board <= n_boards.value:
                 raise RuntimeError(f"Board {self.board} not found: the SDK reports {n_boards.value} board(s).")
 
+            self.serial = self._read_serial(dll, self.board)
+            if self.expected_serial is not None and self.serial is not None and self.serial != self.expected_serial:
+                if self.on_serial_mismatch is None or not self.on_serial_mismatch(self.expected_serial, self.serial):
+                    raise SerialMismatchError(self.board, self.expected_serial, self.serial)
+
             lut_bytes: bytes = str(self.lut_path.resolve()).encode("utf-8")
             rc: int = dll.Load_LUT_file(self.board, c_char_p(lut_bytes))
             if rc != 0:
@@ -116,6 +139,7 @@ class MeadowlarkSLM:
                 except Exception:
                     pass
             self._dll = None
+            self.serial = None
             self._connected = False
             raise
 
@@ -129,6 +153,7 @@ class MeadowlarkSLM:
         finally:
             self._dll = None
             self._last_image = None
+            self.serial = None
             self._connected = False
             if MeadowlarkSLM._active is self:
                 MeadowlarkSLM._active = None
@@ -187,6 +212,14 @@ class MeadowlarkSLM:
         return np.array(self._last_image, copy=True)
 
     @staticmethod
+    def _read_serial(dll: CDLL, board: int) -> int | None:
+        """Serial number reported by Read_Serial_Number(board), or None if the DLL lacks it or reports failure (-1)."""
+        if not hasattr(dll, "Read_Serial_Number"):
+            return None
+        serial: int = dll.Read_Serial_Number(board)
+        return None if serial < 0 else serial
+
+    @staticmethod
     def _last_error(dll: CDLL) -> str:
         if not hasattr(dll, "Get_last_error_message"):
             return ""
@@ -227,6 +260,11 @@ class MeadowlarkSLM:
         # double Read_SLM_temperature(int board)
         dll.Read_SLM_temperature.argtypes = [c_int]
         dll.Read_SLM_temperature.restype = c_double
+
+        # int Read_Serial_Number(int board)  (-1 on failure; signature as used by slmsuite, not yet checked against Blink_C_wrapper.h)
+        if hasattr(dll, "Read_Serial_Number"):
+            dll.Read_Serial_Number.argtypes = [c_int]
+            dll.Read_Serial_Number.restype = c_int
 
         if hasattr(dll, "Get_last_error_message"):
             dll.Get_last_error_message.argtypes = []
