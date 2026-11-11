@@ -9,3 +9,4 @@ Zernike_corrections/
 temperature_logs/*.csv
 test.ipynb
 .vscode/
+CLAUDE.md
