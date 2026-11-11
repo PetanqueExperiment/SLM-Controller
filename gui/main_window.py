@@ -25,10 +25,7 @@ from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
 from gui.panels.output import OutputDock
 
-try:
-    from zernike import __zernikepolar__, __zernikepolynomials__
-except ImportError:
-    from zernike import __zernikepolar__, __zernikepolynomials__
+from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
 import libslm.parameters as param
 
