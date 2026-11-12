@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 import libslm.slm as slm_module
-from libslm.slm import MeadowlarkSLM, SerialMismatchError
+from libslm.slm import MeadowlarkSLM, SerialMismatchError, SlmSizeMismatchError
+
+H, W = 1024, 1024
+SHAPE = (H, W)
 
 
 class _DLLFunction:
@@ -20,13 +23,18 @@ class _DLLFunction:
 class FakeBlinkDLL:
     """Stands in for Blink_C_wrapper.dll; records the calls the driver makes."""
 
-    def __init__(self, n_boards=1, serial=6801, has_serial=True):
+    def __init__(self, n_boards=1, serial=6801, has_serial=True, width=W, height=H, depth=8, has_geometry=True):
         self.calls = []
         self.n_boards = n_boards
         self.serial = serial
+        self.written_sizes = []
         exports = {"Create_SDK": self._create_sdk, "Load_LUT_file": self._load_lut, "Write_image": self._write_image, "ImageWriteComplete": self._write_complete, "Read_SLM_temperature": lambda board: 33.5, "Delete_SDK": lambda: self.calls.append("Delete_SDK"), "Get_last_error_message": lambda: b""}
         if has_serial:
             exports["Read_Serial_Number"] = self._read_serial
+        if has_geometry:
+            exports["Get_image_width"] = lambda board: width
+            exports["Get_image_height"] = lambda board: height
+            exports["Get_image_depth"] = lambda board: depth
         for name, fn in exports.items():
             setattr(self, name, _DLLFunction(fn))
 
@@ -43,8 +51,9 @@ class FakeBlinkDLL:
         self.calls.append(f"Load_LUT_file({board})")
         return 0
 
-    def _write_image(self, board, *args):
+    def _write_image(self, board, buf, image_size, *args):
         self.calls.append(f"Write_image({board})")
+        self.written_sizes.append(image_size)
         return 0
 
     def _write_complete(self, board, timeout):
@@ -62,7 +71,8 @@ def hw(tmp_path, monkeypatch):
 
     def make(fake, **kwargs):
         monkeypatch.setattr(MeadowlarkSLM, "_load_blink_dll", staticmethod(lambda path: fake))
-        slm = MeadowlarkSLM(dll_path=dll_path, lut_path=lut_path, **kwargs)
+        kwargs.setdefault("lut_path", lut_path)
+        slm = MeadowlarkSLM(dll_path=dll_path, **kwargs)
         created.append(slm)
         return slm
 
@@ -73,10 +83,10 @@ def hw(tmp_path, monkeypatch):
 
 
 def test_simulate_round_trip():
-    slm = MeadowlarkSLM(simulate=True)
+    slm = MeadowlarkSLM(simulate=True, image_shape=SHAPE)
     slm.connect()
     try:
-        frame = np.full((slm_module.H, slm_module.W), 7, dtype=np.uint8)
+        frame = np.full((H, W), 7, dtype=np.uint8)
         slm.uploadHologram(frame)
         assert slm.isSimulated() and slm.serial is None
         assert slm.readTemperature() == slm_module.SIMULATED_TEMPERATURE_C
@@ -86,23 +96,20 @@ def test_simulate_round_trip():
     assert not slm.connected
 
 
-def test_connect_loads_wfc_correction_in_radians():
-    slm = MeadowlarkSLM(simulate=True)
-    slm.connect()
-    try:
-        c = slm.correction_pattern
-        assert c.shape == (slm_module.H, slm_module.W) and c.dtype == np.float32
-        assert 0.0 <= c.min() and c.max() <= 2 * np.pi
-    finally:
-        slm.disconnect()
+def test_load_correction_pattern_in_radians(tmp_path):
+    from PIL import Image
+    path = tmp_path / "WFC.bmp"
+    grey = np.zeros((H, W), dtype=np.uint8)
+    grey[0, 0], grey[0, 1] = 255, 51
+    Image.fromarray(grey).save(path)
+    c = slm_module.loadCorrectionPattern(path, SHAPE)
+    assert c.shape == (H, W) and c.dtype == np.float32
+    assert np.isclose(c[0, 0], 2 * np.pi) and np.isclose(c[0, 1], 51 * 2 * np.pi / 255) and c[1, 1] == 0
 
 
-def test_missing_wfc_fails_before_sdk(hw, tmp_path):
-    fake = FakeBlinkDLL()
-    slm = hw(fake, wfc_path=tmp_path / "missing_WFC.bmp")
+def test_missing_wfc_file_is_reported(tmp_path):
     with pytest.raises(FileNotFoundError, match="WFC"):
-        slm.connect()
-    assert fake.calls == [] and not slm.connected
+        slm_module.loadCorrectionPattern(tmp_path / "missing_WFC.bmp", SHAPE)
 
 
 def test_wrong_size_wfc_is_rejected(tmp_path):
@@ -110,11 +117,27 @@ def test_wrong_size_wfc_is_rejected(tmp_path):
     path = tmp_path / "small_WFC.bmp"
     Image.fromarray(np.zeros((10, 20), dtype=np.uint8)).save(path)
     with pytest.raises(ValueError, match="shape"):
-        MeadowlarkSLM(simulate=True, wfc_path=path).connect()
+        slm_module.loadCorrectionPattern(path, SHAPE)
+
+
+def test_connect_without_lut_loads_none(hw):
+    fake = FakeBlinkDLL()
+    slm = hw(fake, lut_path=None)
+    slm.connect()
+    assert slm.connected and slm.lut_path is None
+    assert fake.calls == ["Create_SDK", "Read_Serial_Number(1)"]
+
+
+def test_missing_lut_fails_before_sdk(hw, tmp_path):
+    fake = FakeBlinkDLL()
+    slm = hw(fake, lut_path=tmp_path / "missing.LUT")
+    with pytest.raises(FileNotFoundError, match="LUT"):
+        slm.connect()
+    assert fake.calls == [] and not slm.connected
 
 
 def test_only_one_connected_instance():
-    a, b = MeadowlarkSLM(simulate=True), MeadowlarkSLM(2, simulate=True)
+    a, b = MeadowlarkSLM(simulate=True, image_shape=SHAPE), MeadowlarkSLM(2, simulate=True, image_shape=SHAPE)
     a.connect()
     try:
         with pytest.raises(RuntimeError, match="already in use"):
@@ -194,25 +217,132 @@ def test_upload_uses_own_board(hw):
     fake = FakeBlinkDLL(n_boards=2)
     slm = hw(fake, board=2)
     slm.connect()
-    slm.uploadHologram(np.zeros((slm_module.H, slm_module.W), dtype=np.uint8))
+    slm.uploadHologram(np.zeros((H, W), dtype=np.uint8))
     assert fake.calls[-2:] == ["Write_image(2)", "ImageWriteComplete(2)"]
     assert slm.readTemperature() == 33.5
 
 
-def test_no_wfc_path_means_no_correction():
-    slm = MeadowlarkSLM(simulate=True, wfc_path=None)
+def test_no_hard_coded_lut_or_wfc():
+    assert not hasattr(slm_module, "LUT_FILE") and not hasattr(slm_module, "WFC_FILE")
+    assert MeadowlarkSLM(simulate=True, image_shape=SHAPE).lut_path is None
+
+
+def _write_lut(path, levels=256):
+    path.write_text("".join(f"{i} {1000 + 10 * i}\n" for i in range(levels)), encoding="ascii")
+    return path
+
+
+def test_check_lut_file(tmp_path):
+    assert slm_module.checkLutFile(_write_lut(tmp_path / "ok.LUT")) == 256
+    meadowlark_lut = slm_module.Path(r"C:\Program Files\Meadowlark Optics\Blink OverDrive Plus\LUT Files\slm6801_at785_33C.LUT")
+    if meadowlark_lut.is_file():
+        assert slm_module.checkLutFile(meadowlark_lut) == 256
+    bad_level = tmp_path / "gap.LUT"
+    bad_level.write_text("0 1\n2 3\n", encoding="ascii")
+    bad_text = tmp_path / "text.LUT"
+    bad_text.write_text("0 1\nx y\n", encoding="ascii")
+    empty = tmp_path / "empty.LUT"
+    empty.write_text("\n", encoding="ascii")
+    for path in (bad_level, bad_text, empty):
+        with pytest.raises(ValueError):
+            slm_module.checkLutFile(path)
+    with pytest.raises(FileNotFoundError):
+        slm_module.checkLutFile(tmp_path / "missing.LUT")
+
+
+def test_load_lut_reloads_controller(hw, tmp_path):
+    fake = FakeBlinkDLL()
+    slm = hw(fake)
+    slm.connect()
+    new_lut = _write_lut(tmp_path / "other.LUT")
+    slm.loadLut(new_lut)
+    assert fake.calls[-1] == "Load_LUT_file(1)" and fake.calls.count("Load_LUT_file(1)") == 2
+    assert slm.lut_path == new_lut
+    with pytest.raises(FileNotFoundError):
+        slm.loadLut(tmp_path / "missing.LUT")
+    assert slm.lut_path == new_lut
+
+
+def test_load_lut_requires_connection_and_simulate_only_remembers(tmp_path):
+    new_lut = _write_lut(tmp_path / "other.LUT")
+    slm = MeadowlarkSLM(simulate=True, image_shape=SHAPE)
+    with pytest.raises(RuntimeError):
+        slm.loadLut(new_lut)
     slm.connect()
     try:
-        assert slm.correction_pattern is None
+        slm.loadLut(new_lut)
+        assert slm.lut_path == new_lut
     finally:
         slm.disconnect()
 
 
-def test_load_correction_pattern_matches_driver():
-    a = slm_module.loadCorrectionPattern(slm_module.WFC_FILE)
-    slm = MeadowlarkSLM(simulate=True)
+def test_image_size_is_read_from_hardware(hw):
+    fake = FakeBlinkDLL(width=1920, height=1152, depth=12)
+    slm = hw(fake)
+    slm.connect()
+    assert (slm.width, slm.height, slm.bit_depth) == (1920, 1152, 12)
+    slm.uploadHologram(np.zeros((1152, 1920), dtype=np.uint8))
+    assert fake.written_sizes == [1920 * 1152]
+    with pytest.raises(ValueError, match="1152, 1920"):
+        slm.uploadHologram(np.zeros((H, W), dtype=np.uint8))
+    slm.disconnect()
+    assert slm.width is None and slm.height is None
+
+
+def test_size_mismatch_refuses_before_lut(hw):
+    fake = FakeBlinkDLL(width=1920, height=1152)
+    slm = hw(fake, image_shape=SHAPE)
+    with pytest.raises(SlmSizeMismatchError, match="1920 x 1152"):
+        slm.connect()
+    assert "Load_LUT_file(1)" not in fake.calls and fake.calls[-1] == "Delete_SDK"
+    assert not slm.connected and slm.width is None
+
+
+def test_matching_size_connects(hw):
+    fake = FakeBlinkDLL()
+    slm = hw(fake, image_shape=SHAPE)
+    slm.connect()
+    assert slm.connected and (slm.height, slm.width) == SHAPE
+
+
+@pytest.mark.parametrize("kwargs", [dict(has_geometry=False), dict(width=0), dict(height=-1)])
+def test_missing_or_implausible_size_refuses(hw, kwargs):
+    fake = FakeBlinkDLL(**kwargs)
+    slm = hw(fake)
+    with pytest.raises(RuntimeError, match="image size"):
+        slm.connect()
+    assert not slm.connected and fake.calls[-1] == "Delete_SDK"
+
+
+def test_simulate_needs_image_shape():
+    with pytest.raises(ValueError, match="image_shape"):
+        MeadowlarkSLM(simulate=True).connect()
+    slm = MeadowlarkSLM(simulate=True, image_shape=(600, 800))
     slm.connect()
     try:
-        assert np.array_equal(a, slm.correction_pattern) and a.dtype == np.float32
+        assert (slm.height, slm.width) == (600, 800)
+        slm.uploadHologram(np.zeros((600, 800), dtype=np.uint8))
     finally:
         slm.disconnect()
+
+
+def test_no_hard_coded_frame_size():
+    for name in ("W", "H", "IMAGE_SIZE"):
+        assert not hasattr(slm_module, name)
+
+
+def test_read_pixel_pitch(hw):
+    fake = FakeBlinkDLL()
+    fake.Get_pixel_pitch = _DLLFunction(lambda board: 17.0)
+    slm = hw(fake)
+    with pytest.raises(RuntimeError):
+        slm.readPixelPitchUm()
+    slm.connect()
+    assert slm.readPixelPitchUm() == 17.0
+    sim = MeadowlarkSLM(2, simulate=True, image_shape=SHAPE)
+    slm.disconnect()
+    sim.connect()
+    try:
+        assert sim.readPixelPitchUm() is None
+    finally:
+        sim.disconnect()

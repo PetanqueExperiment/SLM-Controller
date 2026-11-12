@@ -8,7 +8,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-import libslm.parameters as param
+from gui.parameters import param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 
 if TYPE_CHECKING:

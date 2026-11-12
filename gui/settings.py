@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from gui.paths import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
-from gui.paths import STARTUP_LAST_USED, STARTUP_MODES
+from gui.paths import STARTUP_FIXED, STARTUP_LAST_USED, STARTUP_MODES
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -43,6 +43,7 @@ class AppSettings:
 
     startup_mode: str = DEFAULT_STARTUP_MODE
     last_profile: str = DEFAULT_PROFILE
+    startup_profile: str = DEFAULT_PROFILE
 
     @classmethod
     def load(cls, path: Path = SETTINGS_FILE) -> AppSettings:
@@ -62,9 +63,11 @@ class AppSettings:
         _write_json(path, asdict(self))
 
     def startupProfile(self) -> str:
-        """Name of the profile to load when the app starts."""
+        """Name of the profile to load when the app starts: the last used one, or the chosen fixed one."""
         if self.startup_mode == STARTUP_LAST_USED:
             return self.last_profile
+        if self.startup_mode == STARTUP_FIXED:
+            return self.startup_profile
         return DEFAULT_PROFILE
 
 
@@ -188,7 +191,8 @@ class Device:
 
     board: int
     serial: int | None = None
-    factory_lut: str = ""  # name (no extension) of the factory correction .bmp in devices/; "" = none set
+    factory_lut: str = ""  # name (no extension) of the factory correction (WFC) .bmp in devices/; "" = none set
+    lut: str = ""
 
     @property
     def simulated(self) -> bool:
@@ -199,6 +203,7 @@ class Device:
         if self.serial is not None:
             d["serial"] = self.serial
         d["factory_lut"] = self.factory_lut
+        d["lut"] = self.lut
         return d
 
 
@@ -229,7 +234,11 @@ def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
         if not isinstance(factory_lut, str):
             print(f"Ignoring invalid factory_lut {factory_lut!r} for board {board} in {path}")
             factory_lut = ""
-        devices[board] = Device(board, serial, factory_lut.strip())
+        lut = entry.get("lut", "")
+        if not isinstance(lut, str):
+            print(f"Ignoring invalid lut {lut!r} for board {board} in {path}")
+            lut = ""
+        devices[board] = Device(board, serial, factory_lut.strip(), lut.strip())
     return [devices[b] for b in sorted(devices)]
 
 
@@ -263,6 +272,22 @@ def setDeviceFactoryLut(board: int, name: str, path: Path = DEVICES_FILE) -> boo
     for device in devices:
         if device.board == board and not device.simulated:
             device.factory_lut = name
+            saveDevices(devices, path)
+            return True
+    return False
+
+
+def lutPath(name: str, devices_dir: Path | None = None) -> Path:
+    """Path of the controller LUT file ``name`` (stored without extension in devices.json)."""
+    return (DEVICES_DIR if devices_dir is None else devices_dir) / f"{name}.LUT"
+
+
+def setDeviceLut(board: int, name: str, path: Path = DEVICES_FILE) -> bool:
+    """Record the LUT file name for the listed device on ``board``; False if the board is not listed."""
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board and not device.simulated:
+            device.lut = name
             saveDevices(devices, path)
             return True
     return False

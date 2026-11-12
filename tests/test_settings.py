@@ -27,7 +27,7 @@ def test_add_device_creates_file_and_rejects_duplicates(tmp_path):
     assert addDevice(1, path) is True
     assert addDevice(2, path) is False
     assert loadDevices(path) == [SIM, Device(1), Device(2)]
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "factory_lut": ""}, {"board": 2, "factory_lut": ""}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "factory_lut": "", "lut": ""}, {"board": 2, "factory_lut": "", "lut": ""}]}
 
 
 def test_set_device_serial_and_find(tmp_path):
@@ -37,7 +37,7 @@ def test_set_device_serial_and_find(tmp_path):
     assert setDeviceSerial(5, 1234, path) is False
     assert findDevice(1, path) == Device(1, 6801)
     assert findDevice(5, path) is None
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "serial": 6801, "factory_lut": ""}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 1, "serial": 6801, "factory_lut": "", "lut": ""}]}
 
 
 def test_save_devices_sorts_and_deduplicates(tmp_path):
@@ -70,7 +70,7 @@ def test_simulated_slm_is_permanent_and_never_written(tmp_path):
     path = tmp_path / "devices.json"
     assert addDevice(settings.SIMULATED_BOARD, path) is False
     saveDevices([SIM, Device(2)], path)
-    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 2, "factory_lut": ""}]}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"devices": [{"board": 2, "factory_lut": "", "lut": ""}]}
     assert findDevice(settings.SIMULATED_BOARD, path) == SIM
 
 
@@ -123,7 +123,7 @@ ABERRATION_LABELS = ["defocus", "asti 0", "asti 45", "coma 0", "coma 90", "prima
 
 def test_repository_template_is_complete():
     t = settings.loadProfileTemplate()
-    assert set(t) == {"grating", "corrections", "pupil", "aberration"}
+    assert set(t) == {"grating", "corrections", "pupil", "aberration", "operation_mode"}
     assert set(t["grating"]) == {"x_um", "y_um", "phase_levels", "wavelength_nm"}
     assert set(t["corrections"]) == {"manufacturer", "aberration"} and all(isinstance(v, bool) for v in t["corrections"].values())
     assert set(t["pupil"]) == {"enabled", "radius_mm", "x0_mm", "y0_mm", "move_out_um"} and isinstance(t["pupil"]["radius_mm"], str)
@@ -173,5 +173,47 @@ def test_factory_lut_field(tmp_path):
     assert settings.setDeviceFactoryLut(settings.SIMULATED_BOARD, "x", path) is False
     assert settings.setDeviceFactoryLut(9, "x", path) is False
     assert findDevice(1, path).factory_lut == "head_A"
-    assert json.loads(path.read_text(encoding="utf-8"))["devices"][0] == {"board": 1, "factory_lut": "head_A"}
+    assert json.loads(path.read_text(encoding="utf-8"))["devices"][0] == {"board": 1, "factory_lut": "head_A", "lut": ""}
     assert settings.factoryLutPath("head_A", tmp_path) == tmp_path / "head_A.bmp"
+
+
+def test_lut_field(tmp_path):
+    path = tmp_path / "devices.json"
+    path.write_text(json.dumps({"devices": [{"board": 1, "factory_lut": "wfc_A"}, {"board": 2, "lut": " slm6801_at850 "}, {"board": 3, "lut": 7}]}), encoding="utf-8")
+    assert [d.lut for d in loadDevices(path)] == ["", "", "slm6801_at850", ""]
+    assert settings.setDeviceLut(1, "head_A_lut", path) is True
+    assert settings.setDeviceLut(settings.SIMULATED_BOARD, "x", path) is False
+    assert settings.setDeviceLut(9, "x", path) is False
+    assert findDevice(1, path).lut == "head_A_lut" and findDevice(1, path).factory_lut == "wfc_A"
+    assert json.loads(path.read_text(encoding="utf-8"))["devices"][0] == {"board": 1, "factory_lut": "wfc_A", "lut": "head_A_lut"}
+    assert settings.lutPath("head_A_lut", tmp_path) == tmp_path / "head_A_lut.LUT"
+
+
+def test_template_has_operation_mode_sections():
+    t = settings.loadProfileTemplate()
+    assert t["operation_mode"] == {"mode": "Static", "static": {"last_hologram": "none"}, "dynamic": {}}
+
+
+def test_old_profile_without_operation_mode_gets_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "PROFILE_DIR", tmp_path)
+    (tmp_path / "old.json").write_text(json.dumps({"grating": {"x_um": 5}}), encoding="utf-8")
+    params, state = settings.loadProfileParams("old")
+    assert state == settings.PROFILE_LOADED and params["grating"]["x_um"] == 5
+    assert params["operation_mode"] == settings.loadProfileTemplate()["operation_mode"]
+    (tmp_path / "new.json").write_text(json.dumps({"operation_mode": {"static": {"last_hologram": "C:/h.pkl"}, "dynamic": {"future": 1}}}), encoding="utf-8")
+    params, _ = settings.loadProfileParams("new")
+    assert params["operation_mode"] == {"mode": "Static", "static": {"last_hologram": "C:/h.pkl"}, "dynamic": {"future": 1}}
+
+
+def test_fixed_startup_profile(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"startup_mode": "last_used", "last_profile": "main"}), encoding="utf-8")
+    s = AppSettings.load(path)
+    assert s.startup_profile == "default" and s.startupProfile() == "main"
+    s.startup_mode, s.startup_profile = "fixed", "calibration"
+    s.last_profile = "experiment_B"
+    s.save(path)
+    loaded = AppSettings.load(path)
+    assert (loaded.startup_mode, loaded.startup_profile, loaded.last_profile) == ("fixed", "calibration", "experiment_B")
+    assert loaded.startupProfile() == "calibration"
+    assert json.loads(path.read_text(encoding="utf-8")) == {"startup_mode": "fixed", "last_profile": "experiment_B", "startup_profile": "calibration"}

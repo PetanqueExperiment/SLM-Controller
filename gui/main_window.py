@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import filecmp
 import os
 import shutil
@@ -15,9 +16,9 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.dockarea as dockarea
 
-from libslm.slm import MeadowlarkSLM, SerialMismatchError, loadCorrectionPattern
-from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_TEMPLATE_FILE, STARTUP_MODES
-from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, setDeviceFactoryLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
+from libslm.slm import MeadowlarkSLM, SerialMismatchError, checkLutFile, loadCorrectionPattern
+from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, STARTUP_FIXED, STARTUP_MODES
+from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, lutPath, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
 from gui.helpers import framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -25,13 +26,13 @@ from gui.panels.advanced import AdvancedControlPanel
 from gui.panels.aberration import AberrationControlPanel
 from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
-from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES
+from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES, StaticMode
 from gui.panels.modes.common import OperationModePanel
 from gui.panels.output import OutputDock
 from gui.panels.slm_info import SlmInfoDock
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
-import libslm.parameters as param
+from gui.parameters import ParametersError, loadParameters, param
 
 if TYPE_CHECKING:
     from gui.hero import SLMHero
@@ -45,6 +46,7 @@ SLM_INFO_HEIGHT_FRACTION: float = 0.02
 
 # Width split of the central panels: left column (Elementary / Advanced / Aberration / Arbitrary Arrays) and right
 # column (Operation mode / Preview). Panels never shrink below their minimum width.
+NO_LAST_HOLOGRAM: str = "none"
 CENTRAL_LEFT_WIDTH_FRACTION: float = 0.20
 CENTRAL_RIGHT_WIDTH_FRACTION: float = 1.0 - CENTRAL_LEFT_WIDTH_FRACTION
 # Height split of the right column: Operation mode panel (top) and Preview (bottom).
@@ -173,7 +175,9 @@ class SLMGUI(QtWidgets.QMainWindow):
     _startup_mode_group: QtWidgets.QActionGroup
     _connect_action: QtWidgets.QAction  # Device ▸ Connect… (enabled only while no SLM is connected)
     _disconnect_action: QtWidgets.QAction  # Device ▸ Disconnect (enabled only while an SLM is connected)
-    _set_factory_lut_action: QtWidgets.QAction  # Device ▸ Set factory LUT… (enabled only for a real, selected SLM)
+    _set_factory_lut_action: QtWidgets.QAction  # Device ▸ Set WFC… (enabled only for a real, selected SLM)
+    _set_lut_action: QtWidgets.QAction
+    _device_info_action: QtWidgets.QAction
 
     # --- Settings / profiles ---
     settings: AppSettings  # settings/settings.json
@@ -234,6 +238,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         if parent:
             self.parent = parent
 
+        self._loadParameters()
+
         self._remote_control = {}
 
         self._state_dict = {}
@@ -245,6 +251,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.factory_lut = None
         self._suspend_phase_updates = False
         self._dynamic_is_ready = False
+        self._profile_operation_mode: dict[str, Any] = {}
 
         self.initUI()
         self.initPhase()
@@ -349,6 +356,18 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             print(e)
 
+    def _loadParameters(self) -> None:
+        """Load the SLM / optics parameters (parameters/parameters.json) before anything uses them; warn about problems."""
+        try:
+            warnings = loadParameters()
+        except ParametersError as e:
+            QtWidgets.QMessageBox.critical(self, "Parameters missing", f"{e}\n\nThe SLM Controller needs this file from the repository to start.")
+            raise
+        if warnings:
+            text = "Problems in the parameters file:\n- " + "\n- ".join(warnings)
+            print(text)
+            QtWidgets.QMessageBox.warning(self, "Parameters", text)
+
     def connectSLM(self, board: int) -> bool:
         """Connect to the SLM on ``board`` and upload the current hologram. On failure the GUI keeps running without an SLM."""
         if self.SLM is not None:
@@ -357,8 +376,11 @@ class SLMGUI(QtWidgets.QMainWindow):
         name = self._boardLabel(board)
         device = findDevice(board)
         expected = None if device is None else device.serial
+        lut_ok, lut_path = self._deviceLutPath(board, device)
+        if not lut_ok:
+            return False
         try:
-            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, wfc_path=None, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, lut_path=lut_path, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act), image_shape=(param.ImgResY, param.ImgResX))
             slm.connect()
         except SerialMismatchError as e:
             print(f"Connection aborted: {e} Nothing was sent to the SLM.")
@@ -370,12 +392,34 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.SLM = slm
         self.board = board
         self._updateWindowTitle()
-        print(f"Connected to {name}")
+        print(f"Connected to {name}" + ("" if board == SIMULATED_BOARD else f" (LUT: {lut_path or 'none loaded'})"))
         self._checkSerial(device, slm.serial)
+        if board != SIMULATED_BOARD and lut_path is None:
+            text = f"{name}: no LUT is set, so none was loaded.\nThe controller keeps the LUT it already has.\n\nSet it with Device ▸ Set LUT…"
+            print(text.replace("\n\n", " ").replace("\n", " "))
+            QtWidgets.QMessageBox.warning(self, "No LUT", text)
         self._loadFactoryLut(device)
         self._updateCorrectionControls()
         self.updatePhase()
         return True
+
+    def _deviceLutPath(self, board: int, device: Optional[Device]) -> tuple[bool, Optional[Path]]:
+        """LUT to load at connect: (True, devices/<lut>.LUT) if the device has one set, (True, None) if none is set.
+
+        Returns (False, None) with a message if a LUT is set but its file is missing, so the SLM is never driven with
+        a LUT other than the one chosen.
+        """
+        name = "" if device is None else device.lut
+        if board == SIMULATED_BOARD or not name:
+            return True, None
+        path = lutPath(name)
+        if path.is_file():
+            return True, path
+        label = self._boardLabel(board)
+        text = f"{label}: LUT {name!r} is set but its file is missing:\n{path}\n\nNot connected. Put the file back, or choose another LUT with Device ▸ Set LUT…"
+        print(text.replace("\n\n", " ").replace("\n", " "))
+        QtWidgets.QMessageBox.warning(self, "SLM not connected", text)
+        return False, None
 
     def _loadFactoryLut(self, device: Optional[Device]) -> None:
         """Load the connected SLM's factory correction (devices.json factory_lut → devices/<name>.bmp) into self.factory_lut.
@@ -384,22 +428,22 @@ class SLMGUI(QtWidgets.QMainWindow):
         """
         self.factory_lut = None
         if self.board == SIMULATED_BOARD:
-            print("Simulated SLM: no factory LUT")
+            print("Simulated SLM: no WFC")
             return
         name = "" if device is None else device.factory_lut
         label = self._boardLabel(self.board)
         if not name:
-            reason = "no factory LUT is set"
+            reason = "no WFC is set"
         else:
             path = factoryLutPath(name)
             try:
-                self.factory_lut = loadCorrectionPattern(path)
-                print(f"{label}: factory LUT {name!r} loaded from {path}")
+                self.factory_lut = loadCorrectionPattern(path, (param.ImgResY, param.ImgResX))
+                print(f"{label}: WFC {name!r} loaded from {path}")
                 return
             except (OSError, ValueError) as e:
-                reason = f"factory LUT {name!r} could not be loaded ({e})"
+                reason = f"WFC {name!r} could not be loaded ({e})"
         print(f"{label}: {reason}; frames are sent without manufacturer correction")
-        QtWidgets.QMessageBox.warning(self, "No factory LUT", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set factory LUT…")
+        QtWidgets.QMessageBox.warning(self, "No WFC", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set WFC…")
 
     def _confirmSerialOverwrite(self, board: int, expected: int, actual: int) -> bool:
         """Serial number mismatch while connecting (before anything is sent to the SLM). Yes: overwrite it in devices.json and connect; No: abort."""
@@ -440,13 +484,13 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._updateCorrectionControls()
 
     def _updateCorrectionControls(self) -> None:
-        """Manufacturer correction can only be switched while a factory LUT is loaded (never for the Simulated SLM)."""
+        """Manufacturer correction can only be switched while a WFC is loaded (never for the Simulated SLM)."""
         box = getattr(self, "_ManufacturerCorrectionChkBx", None)
         if box is None:
             return
         available = self.factory_lut is not None
         box.setEnabled(available)
-        box.setToolTip("" if available else "No factory LUT loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set factory LUT…)")
+        box.setToolTip("" if available else "No WFC loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set WFC…)")
 
     @property
     def dynamicIsReady(self) -> bool:
@@ -581,14 +625,14 @@ class SLMGUI(QtWidgets.QMainWindow):
         bar.setContextMenuPolicy(QtCore.Qt.PreventContextMenu)
 
         self.top_menu_buttons = {}
-        for label in ("Device", "Profiles", "Settings"):
+        for label in ("Device", "Profile", "Settings"):
             btn = QtWidgets.QPushButton(label)
-            btn.setFixedSize(90, self.TOP_MENU_HEIGHT - 6)
+            btn.setFixedSize(max(90, btn.fontMetrics().horizontalAdvance(label) + 40), self.TOP_MENU_HEIGHT - 6)
             bar.addWidget(btn)
             self.top_menu_buttons[label] = btn
 
         self.top_menu_buttons["Device"].setMenu(self._create_devices_menu())
-        self.top_menu_buttons["Profiles"].setMenu(self._create_profiles_menu())
+        self.top_menu_buttons["Profile"].setMenu(self._create_profiles_menu())
         self.top_menu_buttons["Settings"].setMenu(self._create_settings_menu())
 
         self.addToolBar(QtCore.Qt.TopToolBarArea, bar)
@@ -602,8 +646,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         menu.addSeparator()
         self._connect_action = menu.addAction("Connect…")
         self._connect_action.triggered.connect(lambda _checked=False: self._connectDialog())
-        self._set_factory_lut_action = menu.addAction("Set factory LUT…")
+        self._set_factory_lut_action = menu.addAction("Set WFC…")
         self._set_factory_lut_action.triggered.connect(lambda _checked=False: self._setFactoryLutDialog())
+        self._set_lut_action = menu.addAction("Set LUT…")
+        self._set_lut_action.triggered.connect(lambda _checked=False: self._setLutDialog())
+        self._device_info_action = menu.addAction("Device info…")
+        self._device_info_action.triggered.connect(lambda _checked=False: self._showDeviceInfo())
         self._disconnect_action = menu.addAction("Disconnect")
         self._disconnect_action.triggered.connect(lambda _checked=False: self._disconnectClicked())
         menu.aboutToShow.connect(self._updateDeviceActions)
@@ -612,25 +660,27 @@ class SLMGUI(QtWidgets.QMainWindow):
     def _updateDeviceActions(self) -> None:
         self._connect_action.setEnabled(self.SLM is None)
         self._disconnect_action.setEnabled(self.SLM is not None)
+        self._device_info_action.setEnabled(self.SLM is not None)
         self._set_factory_lut_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
+        self._set_lut_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
 
     def _setFactoryLutDialog(self) -> None:
-        """Device ▸ Set factory LUT…: pick a .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
+        """Device ▸ Set WFC…: pick the factory correction .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
         board = self.board
         if board is None or board == SIMULATED_BOARD:
             return
         label = self._boardLabel(board)
         if findDevice(board) is None:
-            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
+            QtWidgets.QMessageBox.warning(self, "Set WFC", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
             return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"Factory LUT for {label}", str(DEVICES_DIR), "Bitmap (*.bmp)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"WFC for {label}", str(DEVICES_DIR), "Bitmap (*.bmp)")
         if not path:
             return
         source = Path(path)
         try:
-            pattern = loadCorrectionPattern(source)
+            pattern = loadCorrectionPattern(source, (param.ImgResY, param.ImgResX))
         except (OSError, ValueError) as e:
-            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"{source.name} cannot be used:\n{e}")
+            QtWidgets.QMessageBox.warning(self, "Set WFC", f"{source.name} cannot be used:\n{e}")
             return
         name = source.stem
         target = factoryLutPath(name)
@@ -639,20 +689,67 @@ class SLMGUI(QtWidgets.QMainWindow):
             if not (target.exists() and target.resolve() == source.resolve()):
                 if target.exists() and not filecmp.cmp(source, target, shallow=False):
                     text = f"A different file named {target.name} is already in\n{target.parent}\n(it may be used by another SLM).\n\nOverwrite it?"
-                    if QtWidgets.QMessageBox.question(self, "Set factory LUT", text) != QtWidgets.QMessageBox.Yes:
+                    if QtWidgets.QMessageBox.question(self, "Set WFC", text) != QtWidgets.QMessageBox.Yes:
                         return
                 shutil.copyfile(source, target)
             setDeviceFactoryLut(board, name)
         except OSError as e:
-            print("Could not set the factory LUT:", e)
-            QtWidgets.QMessageBox.warning(self, "Set factory LUT", f"Could not set the factory LUT:\n{e}")
+            print("Could not set the WFC:", e)
+            QtWidgets.QMessageBox.warning(self, "Set WFC", f"Could not set the WFC:\n{e}")
             return
-        print(f"{label}: factory LUT set to {name!r} ({target})")
+        print(f"{label}: WFC set to {name!r} ({target})")
         if self.isSLMConnected() and self.board == board:
             self.factory_lut = pattern
             self._updateCorrectionControls()
             self.updatePhase()
-            print(f"{label}: new factory LUT applied")
+            print(f"{label}: new WFC applied")
+
+    def _setLutDialog(self) -> None:
+        """Device ▸ Set LUT…: pick a .LUT for the selected (real) SLM, copy it to devices/ and store its name.
+
+        If that SLM is connected, the LUT is loaded into its controller right away and the current frame is resent.
+        """
+        board = self.board
+        if board is None or board == SIMULATED_BOARD:
+            return
+        label = self._boardLabel(board)
+        if findDevice(board) is None:
+            QtWidgets.QMessageBox.warning(self, "Set LUT", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"LUT for {label}", str(DEVICES_DIR), "LUT (*.LUT *.lut)")
+        if not path:
+            return
+        source = Path(path)
+        try:
+            n_levels = checkLutFile(source)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, "Set LUT", f"{source.name} cannot be used:\n{e}")
+            return
+        name = source.stem
+        target = lutPath(name)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not (target.exists() and target.resolve() == source.resolve()):
+                if target.exists() and not filecmp.cmp(source, target, shallow=False):
+                    text = f"A different file named {target.name} is already in\n{target.parent}\n(it may be used by another SLM).\n\nOverwrite it?"
+                    if QtWidgets.QMessageBox.question(self, "Set LUT", text) != QtWidgets.QMessageBox.Yes:
+                        return
+                shutil.copyfile(source, target)
+            setDeviceLut(board, name)
+        except OSError as e:
+            print("Could not set the LUT:", e)
+            QtWidgets.QMessageBox.warning(self, "Set LUT", f"Could not set the LUT:\n{e}")
+            return
+        print(f"{label}: LUT set to {name!r} ({target}, {n_levels} levels)")
+        if self.isSLMConnected() and self.board == board:
+            try:
+                self.SLM.loadLut(target)
+            except Exception as e:
+                print(f"{label}: could not load the new LUT into the controller: {e}")
+                QtWidgets.QMessageBox.warning(self, "Set LUT", f"The LUT was saved for {label}, but loading it into the controller failed:\n{e}\n\nDisconnect and connect again to load it.")
+                return
+            self.updatePhase()
+            print(f"{label}: new LUT loaded into the controller")
 
     def _disconnectClicked(self) -> None:
         """Device ▸ Disconnect: close the SLM session after confirmation; the GUI keeps running without an SLM."""
@@ -683,7 +780,47 @@ class SLMGUI(QtWidgets.QMainWindow):
     def _deviceLabel(device: Device) -> str:
         if device.simulated:
             return deviceLabel(device)
-        return f"{deviceLabel(device)}  (SN {'not known yet' if device.serial is None else device.serial}, factory LUT: {device.factory_lut or 'none'})"
+        return f"{deviceLabel(device)}  (SN {'not known yet' if device.serial is None else device.serial})"
+
+    def deviceInfoText(self) -> Optional[str]:
+        """Details of the connected SLM, read from the controller where possible; None if no SLM is connected."""
+        slm = self.SLM
+        if slm is None:
+            return None
+        lines = [self._boardLabel(self.board)]
+        if slm.simulate:
+            lines += ["No hardware (simulate mode).", f"Image: {slm.width} x {slm.height} px (from parameters.json)", "LUT: none", "WFC: none"]
+            return "\n".join(lines)
+        device = findDevice(self.board)
+        listed = None if device is None else device.serial
+        serial = "not reported" if slm.serial is None else str(slm.serial)
+        if listed is not None and listed != slm.serial:
+            serial += f" (device list: {listed})"
+        lines.append(f"Serial number: {serial}")
+        lines.append(f"Image: {slm.width} x {slm.height} px, {slm.bit_depth} bit")
+        try:
+            pitch_um = slm.readPixelPitchUm()
+            pitch = "not reported" if pitch_um is None else f"{pitch_um:g} µm"
+        except Exception as e:
+            pitch = f"could not be read ({e})"
+        lines.append(f"Pixel pitch: {pitch} (parameters.json: {param.pslm * 1e6:g} µm)")
+        try:
+            temperature = f"{slm.readTemperature():.1f} °C"
+        except Exception as e:
+            temperature = f"could not be read ({e})"
+        lines.append(f"Temperature: {temperature}")
+        lines.append(f"LUT: {'none loaded' if slm.lut_path is None else Path(slm.lut_path).stem}")
+        wfc = device.factory_lut if device is not None else ""
+        lines.append(f"WFC: {wfc if wfc and self.factory_lut is not None else 'none'}")
+        return "\n".join(lines)
+
+    def _showDeviceInfo(self) -> None:
+        """Device ▸ Device info…: details of the connected SLM."""
+        text = self.deviceInfoText()
+        if text is None:
+            return
+        print("Device info: " + text.replace("\n", " | "))
+        QtWidgets.QMessageBox.information(self, "Device info", text)
 
     def _showDevices(self) -> None:
         devices = loadDevices()
@@ -731,14 +868,43 @@ class SLMGUI(QtWidgets.QMainWindow):
         startup_menu = menu.addMenu("Startup profile")
         self._startup_mode_group = QtWidgets.QActionGroup(self)
         self._startup_mode_group.setExclusive(True)
+        self._startup_mode_actions: dict[str, QtWidgets.QAction] = {}
         for mode, label in STARTUP_MODES.items():
             action = startup_menu.addAction(label)
             action.setCheckable(True)
             action.setData(mode)
             action.setChecked(mode == self.settings.startup_mode)
             self._startup_mode_group.addAction(action)
+            self._startup_mode_actions[mode] = action
+        self._updateStartupProfileLabel()
         self._startup_mode_group.triggered.connect(self._on_startup_mode_selected)
+        startup_menu.addSeparator()
+        startup_menu.addAction("Set profile…").triggered.connect(lambda _checked=False: self._setStartupProfileDialog())
         return menu
+
+    def _updateStartupProfileLabel(self) -> None:
+        self._startup_mode_actions[STARTUP_FIXED].setText(f"Profile: {self.settings.startup_profile}")
+
+    def _setStartupProfileDialog(self) -> None:
+        """Settings ▸ Startup profile ▸ Set profile…: choose a profile in profiles/ and start with it from now on."""
+        names = listProfiles()
+        if not names:
+            QtWidgets.QMessageBox.information(self, "Startup profile", f"No saved profiles in\n{PROFILE_DIR}\n\nSave one first with Profile ▸ Save.")
+            return
+        current = self.settings.startup_profile if self.settings.startup_profile in names else (self.current_profile if self.current_profile in names else names[0])
+        name, ok = QtWidgets.QInputDialog.getItem(self, "Startup profile", "Profile to load when the SLM Controller starts:", names, names.index(current), False)
+        if not ok:
+            return
+        self.settings.startup_profile = name
+        self.settings.startup_mode = STARTUP_FIXED
+        self._updateStartupProfileLabel()
+        self._startup_mode_actions[STARTUP_FIXED].setChecked(True)
+        try:
+            self.settings.save()
+        except OSError as e:
+            print("Could not save settings:", e)
+            return
+        print(f"Startup profile: {name!r}")
 
     def _on_startup_mode_selected(self, action: QtWidgets.QAction) -> None:
         self.settings.startup_mode = str(action.data())
@@ -747,7 +913,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         except OSError as e:
             print("Could not save settings:", e)
             return
-        print(f"Startup profile: {STARTUP_MODES[self.settings.startup_mode]}")
+        if self.settings.startup_mode == STARTUP_FIXED:
+            print(f"Startup profile: {self.settings.startup_profile!r}")
+        else:
+            print(f"Startup profile: {STARTUP_MODES[self.settings.startup_mode]}")
 
     @staticmethod
     def _formatNumber(value: float) -> str:
@@ -768,7 +937,51 @@ class SLMGUI(QtWidgets.QMainWindow):
                 print(f"Profile: pupil {key} = {edit.text()!r} is not a number and is not saved")
         params["pupil"] = pupil
         params["aberration"] = {label: float(v) for label, v in zip(self.aberration_label_list, self.aberration_values)}
+        params["operation_mode"] = self._profileOperationModeParams()
         return params
+
+    def _profileOperationModeParams(self) -> dict[str, Any]:
+        """Profile section of the operation mode: the mode, the Static last hologram file, and the Dynamic section.
+
+        Only the Static mode is saved (Dynamic is in development): in Dynamic mode the section last loaded or saved
+        is written back unchanged, and the "dynamic" section is always kept as it is. A displayed hologram that exists
+        only in memory is not remembered ("none").
+        """
+        section = copy.deepcopy(self._profile_operation_mode)
+        if not isinstance(self.operation_mode, StaticMode):
+            print("Profile: Dynamic mode is in development and is not saved; the operation mode section is kept as loaded")
+            return section
+        hologram_file = self._arbitrary.displayedHologramFile()
+        if hologram_file is None and np.any(self.phasePattern):
+            print("Profile: the displayed hologram is not saved to a file and is not remembered (Save Hologram to keep it)")
+        section["mode"] = StaticMode.name
+        section["static"] = {"last_hologram": hologram_file or NO_LAST_HOLOGRAM}
+        section.setdefault("dynamic", {})
+        self._profile_operation_mode = copy.deepcopy(section)
+        return section
+
+    def _applyProfileOperationMode(self, operation_mode: dict[str, Any]) -> None:
+        """Select the Static mode and display the profile's last hologram file (if not "none"); other modes are not restored yet."""
+        mode = operation_mode.get("mode", StaticMode.name)
+        if mode != StaticMode.name:
+            print(f"Profile: operation mode {mode!r} is not restored (in development); using {StaticMode.name}")
+        if not isinstance(self.operation_mode, StaticMode):
+            self._operation_mode_panel.setOperationMode(StaticMode)
+        static = operation_mode.get("static", {})
+        hologram_file = static.get("last_hologram", NO_LAST_HOLOGRAM) if isinstance(static, dict) else NO_LAST_HOLOGRAM
+        if not hologram_file or hologram_file == NO_LAST_HOLOGRAM:
+            return
+        if not os.path.isfile(hologram_file):
+            text = f"Profile {self.current_profile!r}: hologram file not found:\n{hologram_file}\n\nThe displayed hologram is not changed."
+            print(text.replace("\n\n", " ").replace("\n", " "))
+            QtWidgets.QMessageBox.warning(self, "Profile hologram", text)
+            return
+        try:
+            self._arbitrary.loadPattern(hologram_file)
+        except Exception as e:
+            text = f"Profile {self.current_profile!r}: could not load the hologram\n{hologram_file}:\n{e}"
+            print(text.replace("\n", " "))
+            QtWidgets.QMessageBox.warning(self, "Profile hologram", text)
 
     def applyProfile(self, params: dict[str, Any]) -> None:
         """Set the GUI from full profile parameters (template merged with a profile file); the hologram is updated once at the end."""
@@ -803,6 +1016,9 @@ class SLMGUI(QtWidgets.QMainWindow):
             self.elementary.createGratingPattern(self.dx, self.dy)
             if pupil["enabled"]:
                 self._advanced.calculatePupil()
+            operation_mode = params.get("operation_mode", {})
+            self._profile_operation_mode = copy.deepcopy(operation_mode) if isinstance(operation_mode, dict) else {}
+            self._applyProfileOperationMode(self._profile_operation_mode)
         finally:
             self._suspend_phase_updates = False
         self.updatePhase()
@@ -846,7 +1062,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         elif state == PROFILE_MISSING:
             print(f"Profile {name!r}: no saved file yet, using the default values")
         else:
-            print(f"Profile {name!r} could not be read: using the default values (Profiles ▸ Restore default profile repairs 'default')")
+            print(f"Profile {name!r} could not be read: using the default values (Profile ▸ Restore default profile repairs 'default')")
         self.applyProfile(params)
 
     def saveProfile(self, name: Optional[str] = None) -> Path:
@@ -864,7 +1080,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         return menu
 
     def _restoreDefaultProfileClicked(self) -> None:
-        """Profiles ▸ Restore default profile: overwrite profiles/default.json with the repository template."""
+        """Profile ▸ Restore default profile: overwrite profiles/default.json with the repository template."""
         target = profilePath(DEFAULT_PROFILE)
         active = self.current_profile == DEFAULT_PROFILE
         text = f"Overwrite\n{target}\nwith the default values from the repository\n{PROFILE_TEMPLATE_FILE}?"
@@ -902,7 +1118,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"Saved profile {self.current_profile!r}: {path}")
 
     def _loadProfileDialog(self) -> None:
-        """Profiles ▸ Load…: make another profile active. Never changes the SLM connection: a profile for another SLM is refused."""
+        """Profile ▸ Load…: make another profile active. Never changes the SLM connection: a profile for another SLM is refused."""
         name = self._chooseProfile("Load profile", "Profile to load:")
         if name is None:
             return
@@ -936,7 +1152,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         print(f"Loaded profile {name!r}{hint}")
 
     def _saveProfileAsDialog(self) -> None:
-        """Profiles ▸ Save as…: save the current values under a new name in profiles/ and make it the active profile.
+        """Profile ▸ Save as…: save the current values under a new name in profiles/ and make it the active profile.
 
         The previously active profile file is left as it was last saved.
         """

@@ -23,12 +23,14 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 - `libslm/` — device code, separate from the UI:
   - `slm.py` — `MeadowlarkSLM` (Blink SDK via ctypes): connect / disconnect,
     serial-number check before the LUT is loaded, `uploadHologram`,
-    `readTemperature`, WFC correction, simulate mode. One SDK session per process.
+    `readTemperature`, `loadLut`, simulate mode. One SDK session per process.
   - `gpu.py` — OpenCL hologram kernels: `trap_phase_to_slm`, `slm_to_trap_amp`.
-  - `parameters.py` — optical / device constants (`f`, `M`, `pslm`, image size).
-    Wavelength and P are NOT here: they come from the profile.
+- `gui/parameters.py` — optical / device parameters as `param.<name>` (`f`, `M`, `pslm`,
+  image size, Zernike radius), loaded by `SLMGUI` at every start from the working
+  directory's `parameters/parameters.json` (defaults: `profile_templates/parameters.json`).
+  Wavelength and P are NOT here: they come from the profile.
 - `gui/main_window.py` — `SLMGUI`: shared phase state, `updatePhase()` (the only
-  path that sends frames), menus (Device / Profiles / Settings), docks.
+  path that sends frames), menus (Device / Profile / Settings), docks.
 - `gui/panels/` — one panel per file; `arbitrary_arrays/` is a package
   (`panel.py` UI; `rois.py`, `traps.py`,
   `tweezer_array.py` non-UI; `equalization.py` dormant; `legacy.py` unused old code).
@@ -42,8 +44,8 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 - `tests/` — pytest: `python -m pytest tests` (fake Blink DLL in `tests/test_slm.py`).
 
 ## Working directory (`~/petanque_dev/SLM/`, outside the repo)
-`settings/settings.json` (startup mode, last profile), `profiles/<name>.json`,
-`devices/devices.json` (board, serial and `factory_lut` per real SLM; the Simulated SLM is built in and uses no correction), `devices/<factory_lut>.bmp` (per-SLM manufacturer correction, loaded as `SLMGUI.factory_lut`), `logs/` (temperature CSVs, also
+`settings/settings.json` (startup mode, last profile), `parameters/parameters.json` (optical / device parameters, created from the template if missing), `profiles/<name>.json`,
+`devices/devices.json` (board, serial, `factory_lut` and `lut` per real SLM; the Simulated SLM is built in and uses no correction), `devices/<factory_lut>.bmp` (per-SLM manufacturer wavefront correction (WFC), loaded as `SLMGUI.factory_lut`, Device ▸ Set WFC…), `devices/<lut>.LUT` (per-SLM controller LUT loaded at connect, Device ▸ Set LUT…; none set = no LUT loaded, the controller keeps its current one), `logs/` (temperature CSVs, also
 written to `temperature_logs/` in the repo; not in simulate mode).
 
 ## How to work here

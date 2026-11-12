@@ -1,0 +1,8 @@
+{
+  "slm_width_px": 1024,
+  "slm_height_px": 1024,
+  "objective_focal_length_m": 0.023,
+  "telescope_magnification": 2.3333333333333335,
+  "slm_pixel_pitch_m": 1.7e-05,
+  "slm_max_radius_m": 0.0087
+}

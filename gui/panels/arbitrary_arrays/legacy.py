@@ -17,7 +17,7 @@ import numpy as np
 from PyQt5.QtCore import pyqtSignal
 from pyqtgraph.Qt import QtCore
 
-import libslm.parameters as param
+from gui.parameters import param
 from gui.constants import MESSAGE_FILE
 
 try:

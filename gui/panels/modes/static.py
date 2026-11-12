@@ -12,23 +12,22 @@ if TYPE_CHECKING:
 
 
 class StaticModePage(pg.LayoutWidget):
-    """Static mode controls: the hologram file buttons (same actions as in the Hologram Files panel)."""
+    """Static mode controls: display a blank or a hologram file, and the name of the displayed hologram."""
 
     def __init__(self, gui: SLMGUI) -> None:
         super().__init__()
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.displayLabel = QtWidgets.QLabel('Display hologram:')
         self.blankBtn = QtWidgets.QPushButton('Blank')
-        self.loadBtn = QtWidgets.QPushButton('Load Hologram')
-        self.saveBtn = QtWidgets.QPushButton('Save Hologram')
+        self.loadBtn = QtWidgets.QPushButton('From file...')
         self.displayedHologramLabel = QtWidgets.QLabel()
         self.displayedHologramLabel.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        self.addWidget(self.blankBtn, row=0, col=0)
-        self.addWidget(self.loadBtn, row=0, col=1)
-        self.addWidget(self.saveBtn, row=0, col=2)
-        self.addWidget(self.displayedHologramLabel, row=1, col=0, colspan=4)
-        self.layout.setColumnStretch(3, 1)
-        self.layout.setRowStretch(2, 1)
+        self.addWidget(self.displayLabel, row=0, col=0, colspan=3)
+        self.addWidget(self.blankBtn, row=1, col=0)
+        self.addWidget(self.loadBtn, row=1, col=1)
+        self.addWidget(self.displayedHologramLabel, row=2, col=0, colspan=3)
+        self.layout.setColumnStretch(2, 1)
+        self.layout.setRowStretch(3, 1)
         gui._arbitrary.addDisplayedHologramLabel(self.displayedHologramLabel)
         self.blankBtn.clicked.connect(gui._arbitrary.generateBlank)
         self.loadBtn.clicked.connect(gui._arbitrary.loadPattern_clicked)
-        self.saveBtn.clicked.connect(gui._arbitrary.savePattern_clicked)

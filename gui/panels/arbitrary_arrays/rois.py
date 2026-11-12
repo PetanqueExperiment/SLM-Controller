@@ -11,7 +11,7 @@ import os
 
 import numpy as np
 
-import libslm.parameters as param
+from gui.parameters import param
 from gui.constants import ROI_JSON_UM_PER_CAMERA_PIXEL, SYSTEM_MAGNIFICATION, TWEEZER_ROIS_DIR
 
 

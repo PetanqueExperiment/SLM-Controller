@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-import libslm.parameters as param
+from gui.parameters import param
 from gui.constants import positionToStepPerPixel, positionToStepPerPixelForZ
 
 

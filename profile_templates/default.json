@@ -32,5 +32,12 @@
     "2nd spherical": 0,
     "trefoil 2nd 0": 0,
     "trefoil 2nd 90": 0
+  },
+  "operation_mode": {
+    "mode": "Static",
+    "static": {
+      "last_hologram": "none"
+    },
+    "dynamic": {}
   }
 }

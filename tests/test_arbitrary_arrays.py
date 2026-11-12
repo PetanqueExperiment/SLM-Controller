@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import libslm.parameters as param
+from gui.parameters import param
 from gui.constants import positionToStepPerPixel, positionToStepPerPixelForZ
 from gui import hologram_handler as hologram_files
 from gui.panels.arbitrary_arrays import rois

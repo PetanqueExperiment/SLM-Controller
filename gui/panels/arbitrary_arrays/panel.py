@@ -15,7 +15,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-import libslm.parameters as param
+from gui.parameters import param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import SLM_PATTERNS_DIR, SYSTEM_MAGNIFICATION, TWEEZER_ROIS_DIR
 from gui.helpers import framed_panel, parse_pasted_coordinates
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 NO_ROIS_LOADED_TEXT: str = 'Loaded ROIs: none'
 HOLOGRAM_BLANK_TEXT: str = 'Displayed hologram: blank'
-HOLOGRAM_IN_MEMORY_TEXT: str = 'Displayed hologram: in local memory (not saved)'
+HOLOGRAM_IN_MEMORY_TEXT: str = 'Displayed hologram: from local memory'
 COMPUTED_NONE_TEXT: str = 'Computed hologram: none pending'
 
 
@@ -86,10 +86,8 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
 
         self.label_roi_generator = QtWidgets.QLabel(""" -- ROI GENERATOR -- """)
         self.label_roi_generator.setAlignment(QtCore.Qt.AlignCenter)
-        self.label_Layout_Arbitrary_Array = QtWidgets.QLabel(""" -- ARBITRARY ARRAYS -- """)
+        self.label_Layout_Arbitrary_Array = QtWidgets.QLabel(""" -- HOLOGRAM GENERATOR -- """)
         self.label_Layout_Arbitrary_Array.setAlignment(QtCore.Qt.AlignCenter)
-        self.generateBlankBtn = QtWidgets.QPushButton('Blank')
-        self.loadBtn = QtWidgets.QPushButton('Load Hologram')
         self.saveBtn = QtWidgets.QPushButton('Save Hologram')
         self.latticeGridLabel = QtWidgets.QLabel('Array generator')
         self.latticeRowsLabel = QtWidgets.QLabel('rows')
@@ -196,18 +194,15 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         self.arbitrary_arrays_panel.addWidget(self.label_Layout_Arbitrary_Array, row=line_idx, col=0, colspan=3)
 
         line_idx += 1
-        self.arbitrary_arrays_panel.addWidget(self.loadedRoisLabel, row=line_idx, col=0, colspan=3)
-
-        line_idx += 1
         self.arbitrary_arrays_panel.addWidget(self.generateTrapsBtn, row=line_idx, col=0)
         self.arbitrary_arrays_panel.addWidget(self.plotLoadedTrapsBtn, row=line_idx, col=1)
         self.arbitrary_arrays_panel.addWidget(self.plotTrapsBtn, row=line_idx, col=2)
 
+        line_idx += 1
+        self.arbitrary_arrays_panel.addWidget(self.loadedRoisLabel, row=line_idx, col=0, colspan=3)
+
         # Hologram generator (gui/hologram_generator.py) and hologram files (gui/hologram_handler.py): own panels below
         self.generator_root = pg.LayoutWidget()
-        self.label_hologram_generator = QtWidgets.QLabel(""" -- HOLOGRAM GENERATOR -- """)
-        self.label_hologram_generator.setAlignment(QtCore.Qt.AlignCenter)
-        self.generator_root.addWidget(self.label_hologram_generator, row=0, col=0, colspan=5)
         self.generator_root.addWidget(self.runOnlyBtn, row=1, col=0)
         self.generator_root.addWidget(self.runBtn, row=1, col=1, colspan=4)
         self.generator_root.addWidget(self.methodCB, row=2, col=0)
@@ -219,24 +214,17 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
             self.generator_root.layout.setColumnStretch(col, 1)
 
         self.files_root = pg.LayoutWidget()
-        self.label_hologram_files = QtWidgets.QLabel(""" -- HOLOGRAM FILES -- """)
-        self.label_hologram_files.setAlignment(QtCore.Qt.AlignCenter)
-        self.files_root.addWidget(self.label_hologram_files, row=0, col=0, colspan=3)
-        self.files_root.addWidget(self.generateBlankBtn, row=1, col=0)
-        self.files_root.addWidget(self.loadBtn, row=1, col=1)
-        self.files_root.addWidget(self.saveBtn, row=1, col=2)
+        self.files_root.addWidget(self.saveBtn, row=0, col=0, colspan=3)
         self.displayedHologramLabel = QtWidgets.QLabel(HOLOGRAM_BLANK_TEXT)
         self._displayed_hologram_labels: list[QtWidgets.QLabel] = [self.displayedHologramLabel]
         self.displayedHologramLabel.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        self.files_root.addWidget(self.displayedHologramLabel, row=2, col=0, colspan=3)
+        self.files_root.addWidget(self.displayedHologramLabel, row=1, col=0, colspan=3)
 
         # line_idx += 1
         # self.arbitrary_arrays_panel.addWidget(self.equalize_with_atoms_Btn, row=line_idx, col=0)
         # self.arbitrary_arrays_panel.addWidget(self.computeHologram_Btn, row=line_idx, col=1)
         # self.arbitrary_arrays_panel.addWidget(self.devide_slm_area_Btn, row=line_idx, col=2)
 
-        self.generateBlankBtn.clicked.connect(self.generateBlank)
-        self.loadBtn.clicked.connect(self.loadPattern_clicked)
         self.saveBtn.clicked.connect(self.savePattern_clicked)
         self.generateTrapsBtn.clicked.connect(self.generateTraps)
         self.loadArrayCoordinatesBtn.clicked.connect(self.loadArrayCoordinates_clicked)
@@ -710,6 +698,13 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         self._displayed_hologram_labels.append(label)
         label.setText(self.displayedHologramLabel.text())
         label.setToolTip(self.displayedHologramLabel.toolTip())
+
+    def displayedHologramFile(self) -> str | None:
+        """Path of the file the displayed hologram was loaded from or saved to; None if it only exists in memory or is blank."""
+        pattern = getattr(self.gui, 'phasePattern', None)
+        if self._hologram_source is not None and self._hologram_source[0] is pattern:
+            return os.path.abspath(self._hologram_source[1])
+        return None
 
     def refreshHologramLabel(self) -> None:
         """Show which hologram is displayed: its file if it is unchanged since it was saved / loaded, else blank or in memory."""

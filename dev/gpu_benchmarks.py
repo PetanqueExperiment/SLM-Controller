@@ -32,7 +32,7 @@ def _test_wavelength_m(wavelength_m=None):
 
 def test_GPU_vs_CPU(L = 5, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import libslm.parameters as param
+    from gui.parameters import param
     wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
@@ -154,7 +154,7 @@ def test_GPU_vs_CPU(L = 5, wavelength_m = None):
 
 def test_GPU(L = 5, device = DEVICE, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import libslm.parameters as param
+    from gui.parameters import param
     wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
@@ -205,7 +205,7 @@ def test_GPU(L = 5, device = DEVICE, wavelength_m = None):
 
 def test_GPU_pupil(L = 5, wavelength_m = None):
     import matplotlib.pyplot as plt
-    import libslm.parameters as param
+    from gui.parameters import param
     wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================
@@ -272,7 +272,7 @@ def test_GPU_pupil(L = 5, wavelength_m = None):
 def test_CPU(L = 5, wavelength_m = None):
     
     import matplotlib.pyplot as plt
-    import libslm.parameters as param
+    from gui.parameters import param
     wavelength_m = _test_wavelength_m(wavelength_m)
     
     #==============================================================================

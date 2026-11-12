@@ -4,7 +4,7 @@ import os
 
 import numpy as np
 
-import libslm.parameters as param
+from gui.parameters import param
 
 _SLM_SOFTWARE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
