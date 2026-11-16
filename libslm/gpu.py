@@ -185,8 +185,10 @@ def trap_phase_to_slm(k_list, theta, weight = None, pupil = None, shape = (600,7
         weight = weight.astype(np.float32)
     
     if pupil is None:
-        pupil_longaxis = np.ones(N_traps).astype(np.float32) * X_max
-        pupil_shortaxis = np.ones(N_traps).astype(np.float32) * X_max
+        # Cast after multiplying: float32 * int32 promotes to float64, which the
+        # kernel (float*) would misread as 0-sized pupils (blank hologram, NaNs).
+        pupil_longaxis = (np.ones(N_traps) * X_max).astype(np.float32)
+        pupil_shortaxis = (np.ones(N_traps) * X_max).astype(np.float32)
         pupil_angle = np.zeros(N_traps).astype(np.float32)
     else:
         pupil_longaxis = pupil['pupil_longaxis'].astype(np.float32)
