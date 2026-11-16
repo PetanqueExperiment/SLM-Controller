@@ -58,9 +58,30 @@ import pyopencl as cl
 #I could not use the GPU when the driver updated (automatically) to 9/5/2020. Rolling back to 6/5/2020 solved the issue. 
 #I keep an installation file fordis the drivers in SLM_python/drivers_that_work_for_GPU...
 
-USE_GPU_INDEX = 0
+# The PC has two NVIDIA cards: the RTX 4000 Ada (~27 TFLOPS FP32) and a T1000
+# (~2.5 TFLOPS). Pick the Ada by name: device order changes between boots and
+# when a card drops off the bus, so an index is not reliable.
+PREFERRED_GPU_NAME = "RTX 4000 Ada"
+
+
+def select_device(devices, preferred_name=PREFERRED_GPU_NAME):
+    """Return the first device whose name contains preferred_name (case-insensitive).
+
+    Falls back to the first device, with a warning, if none matches.
+    """
+    if not devices:
+        raise RuntimeError("No OpenCL device found: hologram computation needs a GPU.")
+    for dev in devices:
+        if preferred_name.lower() in dev.name.lower():
+            return dev
+    print(f"WARNING: no OpenCL device named '{preferred_name}' found; "
+          f"using '{devices[0].name}' instead.")
+    return devices[0]
+
+
 PLATFORMS = cl.get_platforms()
-DEVICE = [PLATFORMS[USE_GPU_INDEX].get_devices()[0]]
+_ALL_DEVICES = [dev for platform in PLATFORMS for dev in platform.get_devices()]
+DEVICE = [select_device(_ALL_DEVICES)]
 print('Using GPU:', DEVICE)
 
 # Build the hologram kernel once per device. Re-building cl.Program on every
