@@ -114,7 +114,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         self.saveArrayCoordinatesBtn.setToolTip('Write the array to a rois.json without loading it.')
         self.saveAndLoadArrayCoordinatesBtn = QtWidgets.QPushButton('Save && use')
         self.saveAndLoadArrayCoordinatesBtn.setToolTip('Write the array to a rois.json and use it as the current traps.')
-        self.generateTrapsBtn = QtWidgets.QPushButton('Load ROIs')
+        self.generateTrapsBtn = QtWidgets.QPushButton('Load Traps')
         self.generateTrapsBtn.setToolTip('Choose a rois.json and load it as the current traps.')
         self.loadedRoisLabel = QtWidgets.QLabel(NO_ROIS_LOADED_TEXT)
         self.loadedRoisLabel.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
@@ -273,7 +273,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
                 print('Run aborted: could not reload', self._rois_path)
                 return
         elif not self._traps_ready():
-            print('Run aborted: no ROIs loaded. Use Load ROIs, or Use / Save & use in the ROI generator.')
+            print('Run aborted: no ROIs loaded. Use Load Traps, or Use / Save & use in the ROI generator.')
             return
         if not self._prepareTrapArrays():
             print('Run aborted: could not prepare the traps.')
@@ -451,7 +451,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         """
         if not self._traps_ready():
             if self._rois_path is None:
-                print('No ROIs loaded. Use Load ROIs, or Use / Save & use in the ROI generator.')
+                print('No ROIs loaded. Use Load Traps, or Use / Save & use in the ROI generator.')
                 return False
             print('Trap coordinates not in memory; reloading', self._rois_path)
             if not self._load_traps_from_pattern_file(self._rois_path, verbose=False):

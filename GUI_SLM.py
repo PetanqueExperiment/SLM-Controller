@@ -11,11 +11,12 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 from pyqtgraph.Qt import QtWidgets
 
 from gui.helpers import (
+    RESTART_RUNNING_FLAG,
     application_icon,
     parse_launch_args,
     register_windows_taskbar_app_id,
+    request_running_instance_restart,
 )
-from gui.main_window import SLMGUI
 
 
 if __name__ == "__main__":
@@ -28,11 +29,25 @@ if __name__ == "__main__":
     else:
         app = QtWidgets.QApplication.instance()
 
+    if _args.restart_running:
+        # Started from the taskbar's Restart: hand the request to the running GUI and exit.
+        if request_running_instance_restart():
+            sys.exit(0)
+        # Nothing running: start normally.
+        sys.argv = [a for a in sys.argv if a != RESTART_RUNNING_FLAG]
+
+    # Imported here so a taskbar Restart request exits quickly, without loading the GUI.
+    from gui.main_window import SLMGUI
+
     _app_icon = application_icon()
     app.setWindowIcon(_app_icon)
 
     slmGui = SLMGUI(start_hero=not _args.no_hero, hero_name=_args.hero_name)
     slmGui.setWindowIcon(_app_icon)
+    # Tray app: closing the window (or a plot / dialog while it is hidden) must not end the app.
+    app.setQuitOnLastWindowClosed(not slmGui.hasTray())
+    # Also release the SLM when Windows ends the session (logoff / shutdown) without a close event.
+    app.aboutToQuit.connect(slmGui.shutdown)
     slmGui.showMaximized()
     try:
         ret = app.exec_()

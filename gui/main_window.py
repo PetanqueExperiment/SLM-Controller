@@ -14,12 +14,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from PyQt5 import QtNetwork
 import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError, checkLutFile, loadCorrectionPattern
 from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, STARTUP_FIXED, STARTUP_MODES
 from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, lutPath, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
-from gui.helpers import framed_panel
+from gui.helpers import CONTROL_SERVER_NAME, RESTART_REQUEST, framed_panel, jump_list_restart_command, launch_detached, restart_command
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
 from gui.panels.advanced import AdvancedControlPanel
@@ -271,7 +272,111 @@ class SLMGUI(QtWidgets.QMainWindow):
         if start_hero:
             self._start_hero(hero_name)
 
+        self._restart_requested = False
+        self._setupTray()
+        self._setupControlServer()
+        self._setupTaskbarJumpList()
+
         QtCore.QTimer.singleShot(0, self._connectAtStartup)
+
+    # ----- system tray -------------------------------------------------------------------
+
+    def _setupTray(self) -> None:
+        """Tray icon with Show / Restart / Quit. Without a system tray the GUI works as before."""
+        self._tray: Optional[QtWidgets.QSystemTrayIcon] = None
+        self._quitting = False
+        self._tray_hint_shown = False
+        if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon = QtWidgets.QApplication.windowIcon()
+        if icon.isNull():
+            icon = self.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon)
+        tray = QtWidgets.QSystemTrayIcon(icon, self)
+        tray.setToolTip("SLM Controller")
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Show SLM Controller", self._showFromTray)
+        menu.addSeparator()
+        menu.addAction("Restart SLM Controller", self.restartApp)
+        menu.addAction("Quit SLM Controller", self._quitFromTray)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._onTrayActivated)
+        tray.show()
+        self._tray = tray
+
+    def hasTray(self) -> bool:
+        return self._tray is not None
+
+    def _quitFromTray(self) -> None:
+        self._quitting = True
+        self.close()
+
+    def _onTrayActivated(self, reason) -> None:
+        if reason in (QtWidgets.QSystemTrayIcon.Trigger, QtWidgets.QSystemTrayIcon.DoubleClick):
+            self._showFromTray()
+
+    def _showFromTray(self) -> None:
+        if self.isMinimized():
+            self.showMaximized()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def restartApp(self) -> None:
+        """Close this GUI the normal way (profile saved, SLM and HERO released), then start a fresh one.
+
+        No confirmation. The new instance reconnects to the profile's SLM at startup, like a manual restart.
+        """
+        if getattr(self, "_shut_down", False) or self._restart_requested:
+            return
+        print("Restarting SLM Controller...")
+        self._restart_requested = True
+        self._quitting = True
+        self.close()
+
+    # ----- taskbar Restart (jump list + local pipe) --------------------------------------
+
+    def _setupControlServer(self) -> None:
+        """Listen for Restart requests from the taskbar jump list (a separate, short-lived process)."""
+        self._control_server: Optional[QtNetwork.QLocalServer] = None
+        server = QtNetwork.QLocalServer(self)
+        if not server.listen(CONTROL_SERVER_NAME):
+            print("Taskbar Restart unavailable (could not open control pipe):", server.errorString())
+            return
+        server.newConnection.connect(self._onControlConnection)
+        self._control_server = server
+
+    def _onControlConnection(self) -> None:
+        server = self._control_server
+        if server is None:
+            return
+        while server.hasPendingConnections():
+            socket = server.nextPendingConnection()
+            socket.readyRead.connect(lambda s=socket: self._onControlData(s))
+            socket.disconnected.connect(socket.deleteLater)
+
+    def _onControlData(self, socket: QtNetwork.QLocalSocket) -> None:
+        data = bytes(socket.readAll())
+        if RESTART_REQUEST.strip() in data:
+            # Leave the socket's signal handler before tearing the window down.
+            QtCore.QTimer.singleShot(0, self.restartApp)
+
+    def _setupTaskbarJumpList(self) -> None:
+        """Add Restart SLM Controller to the right-click menu of the Windows taskbar icon."""
+        if sys.platform != "win32":
+            return
+        try:
+            from PyQt5 import QtWinExtras
+            program, arguments = jump_list_restart_command()
+            jump_list = QtWinExtras.QWinJumpList(self)
+            tasks = jump_list.tasks()
+            tasks.clear()
+            item = tasks.addLink(QtWidgets.QApplication.windowIcon(), "Restart SLM Controller", program, arguments)
+            item.setWorkingDirectory(os.path.dirname(arguments[0]))
+            tasks.setVisible(True)
+            self._jump_list = jump_list
+        except Exception as e:  # cosmetic feature: never stop the GUI from starting
+            print("Taskbar Restart entry unavailable:", e)
 
     def _connectAtStartup(self) -> None:
         """Last startup step, run once the window is up: connect to the SLM stored in the profile, if any."""
@@ -1353,7 +1458,31 @@ class SLMGUI(QtWidgets.QMainWindow):
         if slm is not None:
             slm.disconnect()
 
-    def closeEvent(self, err: QtGui.QCloseEvent) -> None:
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """With a tray icon, closing the window only hides it; Quit / Restart in the tray menu end the app."""
+        if getattr(self, "_tray", None) is not None and not self._quitting:
+            event.ignore()
+            self.hide()
+            if not self._tray_hint_shown:
+                self._tray_hint_shown = True
+                self._tray.showMessage(
+                    "SLM Controller",
+                    "Still running in the tray: the SLM stays connected. "
+                    "Right-click the tray icon to quit or restart.",
+                    QtWidgets.QSystemTrayIcon.Information, 6000,
+                )
+            return
+        self.shutdown()
+        if getattr(self, "_restart_requested", False):
+            self._launchReplacement()
+        # Quit even if another top-level window (plot, dialog) is still open.
+        QtWidgets.QApplication.quit()
+
+    def shutdown(self) -> None:
+        """Save the profile and release the SLM, HERO and temperature log. Safe to call more than once."""
+        if getattr(self, "_shut_down", False):
+            return
+        self._shut_down = True
         try:
             print("Saved profile:", self.saveProfile())
             self.settings.last_profile = self.current_profile
@@ -1367,5 +1496,26 @@ class SLMGUI(QtWidgets.QMainWindow):
         if log is not None:
             log.close()
         self._stop_hero()
+        server = getattr(self, "_control_server", None)
+        if server is not None:
+            # Free the pipe name before the replacement instance starts listening on it.
+            server.close()
+            self._control_server = None
         self._restore_stdio()
         self.__del__()
+        tray = getattr(self, "_tray", None)
+        if tray is not None:
+            tray.hide()
+
+    def _launchReplacement(self) -> None:
+        """Start the new SLM Controller; called after shutdown() released the SLM and the HERO name."""
+        command = restart_command()
+        try:
+            launch_detached(command)
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Restart SLM Controller",
+                f"Could not start a new SLM Controller ({e}).\n\n"
+                "This one has already disconnected the SLM and will close. "
+                "Start it again with the desktop shortcut.",
+            )

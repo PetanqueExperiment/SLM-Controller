@@ -4,6 +4,7 @@ import argparse
 import ast
 import os
 import re
+import subprocess
 import sys
 
 import numpy as np
@@ -91,6 +92,66 @@ def register_windows_taskbar_app_id() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Petanque.SLMController.GUI.1")
 
 
+# Local pipe the running GUI listens on, so the taskbar's Restart (a separate process) can reach it.
+CONTROL_SERVER_NAME = "Petanque.SLMController.GUI.1.control"
+RESTART_REQUEST = b"restart\n"
+RESTART_RUNNING_FLAG = "--restart-running"
+
+
+def restart_command(argv: list[str] | None = None) -> list[str]:
+    """Command line that starts the SLM Controller again: same Python, same launch flags."""
+    if argv is None:
+        argv = sys.argv
+    flags = [a for a in argv[1:] if a != RESTART_RUNNING_FLAG]
+    return [sys.executable, os.path.join(LOCAL_DIR, "GUI_SLM.py"), *flags]
+
+
+def jump_list_restart_command(argv: list[str] | None = None) -> tuple[str, list[str]]:
+    """(program, arguments) for the taskbar's Restart entry: asks the running GUI to restart.
+
+    Uses pythonw.exe when available so no console window flashes up.
+    """
+    command = restart_command(argv)
+    program = command[0]
+    pythonw = os.path.join(os.path.dirname(program), "pythonw.exe")
+    if sys.platform == "win32" and os.path.isfile(pythonw):
+        program = pythonw
+    return program, [*command[1:], RESTART_RUNNING_FLAG]
+
+
+def request_running_instance_restart(timeout_ms: int = 2000) -> bool:
+    """Ask an already running SLM Controller to restart. False if none answers.
+
+    Needs a QCoreApplication / QApplication.
+    """
+    from PyQt5 import QtNetwork
+
+    socket = QtNetwork.QLocalSocket()
+    socket.connectToServer(CONTROL_SERVER_NAME)
+    if not socket.waitForConnected(timeout_ms):
+        return False
+    socket.write(RESTART_REQUEST)
+    sent = socket.waitForBytesWritten(timeout_ms)
+    socket.disconnectFromServer()
+    return sent
+
+
+def launch_detached(command: list[str]) -> None:
+    """Start ``command`` independent of this process (no console window on Windows).
+
+    Raises OSError if the process cannot be started.
+    """
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(command, cwd=LOCAL_DIR, creationflags=flags, close_fds=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(command, cwd=LOCAL_DIR, start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+
+
 def application_icon(base_dir: str | None = None) -> QtGui.QIcon:
     """Load the GUI icon. Requires QApplication (QIcon may use QPixmap internally)."""
     if base_dir is None:
@@ -106,6 +167,10 @@ def parse_launch_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--hero-name", default=None, help="HERO name (default: SLM_Controller, SLM_Controller_sim when the profile's SLM is the Simulated SLM)."
+    )
+    parser.add_argument(
+        RESTART_RUNNING_FLAG, action="store_true",
+        help="Ask the running SLM Controller to restart (used by the taskbar); start normally if none is running.",
     )
     args, _unknown = parser.parse_known_args(argv)
     return args
