@@ -23,11 +23,18 @@ class _DLLFunction:
 class FakeBlinkDLL:
     """Stands in for Blink_C_wrapper.dll; records the calls the driver makes."""
 
-    def __init__(self, n_boards=1, serial=6801, has_serial=True, width=W, height=H, depth=8, has_geometry=True):
+    def __init__(self, n_boards=1, serial=6801, has_serial=True, width=W, height=H, depth=8, has_geometry=True, has_sequence=True):
         self.calls = []
         self.n_boards = n_boards
         self.serial = serial
         self.written_sizes = []
+        self.sequence = None
+        self.load_sequence_rc = 0
+        self.select_rc = 0
+        self.select_args = []
+        self.write_complete_rc = 0
+        self.write_complete_timeouts = []
+        self.write_complete_delay_s = 0.0
         exports = {"Create_SDK": self._create_sdk, "Load_LUT_file": self._load_lut, "Write_image": self._write_image, "ImageWriteComplete": self._write_complete, "Read_SLM_temperature": lambda board: 33.5, "Delete_SDK": lambda: self.calls.append("Delete_SDK"), "Get_last_error_message": lambda: b""}
         if has_serial:
             exports["Read_Serial_Number"] = self._read_serial
@@ -35,8 +42,21 @@ class FakeBlinkDLL:
             exports["Get_image_width"] = lambda board: width
             exports["Get_image_height"] = lambda board: height
             exports["Get_image_depth"] = lambda board: depth
+        if has_sequence:
+            exports["Load_sequence"] = self._load_sequence
+            exports["Select_image"] = self._select_image
         for name, fn in exports.items():
             setattr(self, name, _DLLFunction(fn))
+
+    def _load_sequence(self, board, buf, image_size, list_length, *args):
+        self.calls.append(f"Load_sequence({board})")
+        self.sequence = (image_size, list_length, np.ctypeslib.as_array(buf, shape=(image_size * list_length,)).copy(), args)
+        return self.load_sequence_rc
+
+    def _select_image(self, board, frame, *args):
+        self.calls.append(f"Select_image({board}, {frame})")
+        self.select_args.append(args)
+        return self.select_rc
 
     def _create_sdk(self, bit_depth, n_boards_ref, constructed_ok_ref, *args):
         self.calls.append("Create_SDK")
@@ -58,7 +78,11 @@ class FakeBlinkDLL:
 
     def _write_complete(self, board, timeout):
         self.calls.append(f"ImageWriteComplete({board})")
-        return 0
+        self.write_complete_timeouts.append(timeout)
+        if self.write_complete_delay_s:
+            import time
+            time.sleep(self.write_complete_delay_s)
+        return self.write_complete_rc
 
 
 @pytest.fixture
@@ -355,3 +379,152 @@ def test_read_pixel_pitch(hw):
         assert sim.readPixelPitchUm() is None
     finally:
         sim.disconnect()
+
+
+SEQ_SHAPE = (4, 6)
+
+
+def _seq_frames(n, shape=SEQ_SHAPE):
+    return [np.full(shape, i, dtype=np.uint8) for i in range(n)]
+
+
+@pytest.fixture
+def seq_slm(hw):
+    fake = FakeBlinkDLL(width=SEQ_SHAPE[1], height=SEQ_SHAPE[0])
+    slm = hw(fake, lut_path=None)
+    slm.connect()
+    return slm, fake
+
+
+def test_load_sequence_sends_frames_back_to_back(seq_slm):
+    slm, fake = seq_slm
+    frames = _seq_frames(3)
+    frames[1][0, 1] = 200
+    slm.loadSequence(frames)
+    image_size, n, data, args = fake.sequence
+    assert (image_size, n) == (24, 3) and slm.sequence_length == 3
+    assert np.array_equal(data, np.stack(frames).ravel())
+    assert args == (0, 0, 0, 0, slm_module.TRIGGER_TIMEOUT_MS)
+
+
+def test_load_sequence_accepts_a_3d_array(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(np.stack(_seq_frames(2)))
+    assert slm.sequence_length == 2 and fake.sequence[1] == 2
+
+
+@pytest.mark.parametrize("frames", [[], [np.zeros((4, 5), np.uint8)], np.zeros((4, 6), np.uint8)])
+def test_load_sequence_rejects_bad_frames(seq_slm, frames):
+    slm, fake = seq_slm
+    with pytest.raises(ValueError):
+        slm.loadSequence(frames)
+    assert fake.sequence is None and slm.sequence_length is None
+
+
+def test_load_sequence_rejects_too_many_frames(seq_slm, monkeypatch):
+    slm, fake = seq_slm
+    monkeypatch.setattr(slm_module, "MAX_SEQUENCE_FRAMES", 2)
+    with pytest.raises(ValueError, match="1 … 2"):
+        slm.loadSequence(_seq_frames(3))
+    assert fake.sequence is None
+
+
+def test_load_sequence_failure_leaves_no_sequence(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(2))
+    fake.load_sequence_rc = -1
+    with pytest.raises(RuntimeError, match="Load_sequence returned -1"):
+        slm.loadSequence(_seq_frames(2))
+    assert slm.sequence_length is None
+
+
+def test_load_sequence_needs_the_dll_functions(hw):
+    slm = hw(FakeBlinkDLL(width=SEQ_SHAPE[1], height=SEQ_SHAPE[0], has_sequence=False), lut_path=None)
+    slm.connect()
+    with pytest.raises(RuntimeError, match="Load_sequence"):
+        slm.loadSequence(_seq_frames(1))
+
+
+def test_select_frame_passes_trigger_options(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(3))
+    assert slm.selectFrame(2, timeout_ms=150, output_pulse=True)
+    assert slm.selectFrame(0, wait_for_trigger=False, flip_immediate=True)
+    assert fake.calls[-4:] == ["Select_image(1, 2)", "ImageWriteComplete(1)", "Select_image(1, 0)", "ImageWriteComplete(1)"]
+    assert fake.write_complete_timeouts[-2:] == [150, slm_module.TRIGGER_TIMEOUT_MS]
+    assert fake.select_args == [(1, 0, 1, 0, 150), (0, 1, 0, 0, slm_module.TRIGGER_TIMEOUT_MS)]
+
+
+def test_select_frame_reports_failure(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(1))
+    fake.select_rc = -1
+    assert slm.selectFrame(0, timeout_ms=10) is False
+    assert fake.calls[-1] == "Select_image(1, 0)"
+
+
+def test_select_frame_no_trigger_reported_by_write_complete(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(1))
+    fake.write_complete_rc = -1
+    assert slm.selectFrame(0, timeout_ms=10) is False
+
+
+def test_select_frame_wait_reaching_timeout_counts_as_no_trigger(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(1))
+    fake.write_complete_delay_s = 0.03
+    assert slm.selectFrame(0, timeout_ms=20) is False
+    assert slm.selectFrame(0, wait_for_trigger=False, timeout_ms=20) is True
+
+
+def test_select_frame_checks_sequence_and_index(seq_slm):
+    slm, fake = seq_slm
+    with pytest.raises(RuntimeError, match="No frame sequence"):
+        slm.selectFrame(0)
+    slm.loadSequence(_seq_frames(2))
+    for frame in (-1, 2):
+        with pytest.raises(ValueError, match="out of range"):
+            slm.selectFrame(frame)
+    with pytest.raises(ValueError, match="timeout_ms"):
+        slm.selectFrame(0, timeout_ms=-1)
+    assert not any(c.startswith("Select_image") for c in fake.calls)
+
+
+def test_upload_discards_the_sequence(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(2))
+    slm.uploadHologram(np.zeros(SEQ_SHAPE, np.uint8))
+    assert slm.sequence_length is None
+    with pytest.raises(RuntimeError, match="No frame sequence"):
+        slm.selectFrame(0)
+
+
+def test_disconnect_discards_the_sequence(seq_slm):
+    slm, fake = seq_slm
+    slm.loadSequence(_seq_frames(2))
+    slm.disconnect()
+    assert slm.sequence_length is None
+
+
+def test_sequence_requires_connection():
+    slm = MeadowlarkSLM(simulate=True, expected_shape=SEQ_SHAPE)
+    with pytest.raises(RuntimeError, match="not connected"):
+        slm.loadSequence(_seq_frames(1))
+    with pytest.raises(RuntimeError, match="not connected"):
+        slm.selectFrame(0)
+
+
+def test_simulated_sequence():
+    slm = MeadowlarkSLM(simulate=True, expected_shape=SEQ_SHAPE)
+    slm.connect()
+    try:
+        slm.loadSequence(_seq_frames(3))
+        assert slm.sequence_length == 3
+        assert slm.selectFrame(2, wait_for_trigger=False)
+        assert np.array_equal(slm.getLastHologram(), np.full(SEQ_SHAPE, 2, np.uint8))
+        assert slm.selectFrame(1, timeout_ms=1) is False
+        assert np.array_equal(slm.getLastHologram(), np.full(SEQ_SHAPE, 2, np.uint8))
+        assert slm.lastErrorMessage() == ""
+    finally:
+        slm.disconnect()

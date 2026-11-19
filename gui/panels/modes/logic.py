@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 DYNAMIC_READY_TEXT: str = 'Ready'
 DYNAMIC_EDITING_TEXT: str = 'Editing'
+DEFAULT_TRIGGER_TIMEOUT_MS: int = 1000
+MIN_TRIGGER_TIMEOUT_MS: int = 1
+MAX_TRIGGER_TIMEOUT_MS: int = 60000
 
 
 def ordinal(n: int) -> str:
@@ -96,7 +99,7 @@ class DynamicMode(OperationMode):
     def buildPage(self, gui: SLMGUI) -> QtWidgets.QWidget:
         from gui.panels.modes.dynamic import DynamicModePage
 
-        return DynamicModePage(self)
+        return DynamicModePage(self, gui)
 
     def statusText(self, gui: SLMGUI) -> str | None:
         return DYNAMIC_READY_TEXT if gui.dynamicIsReady else DYNAMIC_EDITING_TEXT
@@ -112,6 +115,10 @@ class DynamicMode(OperationMode):
             return False
         self.holograms.pop()
         return True
+
+    def missingSlots(self) -> list[int]:
+        """Indices of slots without a hologram."""
+        return [i for i, slot in enumerate(self.holograms) if slot.data is None]
 
     def setHologram(self, index: int, path: str, data: dict[str, Any]) -> None:
         """Store the hologram loaded from ``path`` in slot ``index``."""

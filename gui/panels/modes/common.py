@@ -70,6 +70,9 @@ class OperationModePanel(QtWidgets.QWidget):
 
     def setOperationMode(self, mode_cls: type[OperationMode]) -> None:
         """Deactivate the current mode, activate ``mode_cls`` and show its controls and name in the selector."""
+        if self.gui.sequenceIsLoaded and not isinstance(self.gui.operation_mode, mode_cls):
+            print('Operation mode not changed: a frame sequence is running (Stop it first)')
+            return
         self.gui.operation_mode.deactivate()
         mode = self._modes[mode_cls]
         self.gui.operation_mode = mode
@@ -82,6 +85,10 @@ class OperationModePanel(QtWidgets.QWidget):
         self._showPage(mode_cls)
         self.refreshStatus()
         print('Operation mode:', mode.name)
+
+    def page(self, mode_cls: type[OperationMode]) -> QtWidgets.QWidget:
+        """The page of controls of ``mode_cls``."""
+        return self._pages[mode_cls]
 
     def _showPage(self, mode_cls: type[OperationMode]) -> None:
         """Show the page of ``mode_cls``; hidden pages do not count for the panel height."""

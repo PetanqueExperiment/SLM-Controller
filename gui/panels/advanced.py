@@ -11,6 +11,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from gui.parameters import param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
 from gui.constants import PUPIL_VERTICAL_OFFSET, positionToStepPerPixel
+from gui.slm_frame import applyPupilMask
 
 if TYPE_CHECKING:
     from gui.main_window import SLMGUI
@@ -266,8 +267,7 @@ class AdvancedControlPanel(QtWidgets.QWidget):
         #     self.gui.totalPhase = self.gui.totalPhase - self.gui.phasePattern + phi
 
         # else:
-        self.gui.totalPhase *= self.gui.pupil
-        self.gui.totalPhase += self.gui.grating_out
+        self.gui.totalPhase = applyPupilMask(self.gui.totalPhase, self.gui.pupil, self.gui.grating_out)
 
     def apply_pupil_longaxis_byatom_loop(self, longaxis_ratio: float = 1.0) -> None:
         txt = self.gui.pupilEdt.text()

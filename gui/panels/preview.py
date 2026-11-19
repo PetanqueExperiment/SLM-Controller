@@ -172,6 +172,10 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             self.label_slm_temperature.setText("Temp: —")
             self.label_slm_temperature.setToolTip("SLM temperature: no SLM connected")
             return
+        if self.gui.sequenceIsRunning():
+            self.label_slm_temperature.setText("Temp: paused")
+            self.label_slm_temperature.setToolTip("SLM temperature is not read (nor logged) while a frame sequence is running")
+            return
         try:
             temp_c = slm.readTemperature()
         except Exception:

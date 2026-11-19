@@ -26,9 +26,13 @@ from gui.panels.advanced import AdvancedControlPanel
 from gui.panels.aberration import AberrationControlPanel
 from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
-from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES, StaticMode
+from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES, DynamicMode, StaticMode
 from gui.panels.modes.common import OperationModePanel
+from gui.panels.modes.logic import DEFAULT_TRIGGER_TIMEOUT_MS
 from gui.panels.output import OutputDock
+from gui.sequence_run import RUN_ERROR, RUN_NO_TRIGGER
+from gui.sequence_thread import SequenceRunThread
+from gui.slm_frame import FrameTerms, composeSlmFrame
 from gui.panels.slm_info import SlmInfoDock
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
@@ -184,6 +188,11 @@ class SLMGUI(QtWidgets.QMainWindow):
     current_profile: str  # name of the active profile (profiles/<name>.json)
     _suspend_phase_updates: bool  # True while a profile is applied: updatePhase() waits until all values are set
 
+    # --- Dynamic mode ---
+    trigger_timeout_ms: int  # sequence run ends when no trigger arrives within this time (Dynamic mode, Timeout)
+    flip_immediate: bool  # Select_image flip_immediate: flip right at the trigger instead of after the 0–0.696 ms sync
+    _sequence_thread: Optional[SequenceRunThread]  # running sequence (Arm … end of run); None otherwise
+
     # --- Aliases of panel widgets ---
     _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
     _zernikeCorrectionChkBx: QtWidgets.QCheckBox
@@ -251,6 +260,10 @@ class SLMGUI(QtWidgets.QMainWindow):
         self.factory_lut = None
         self._suspend_phase_updates = False
         self._dynamic_is_ready = False
+        self._sequence_is_loaded = False
+        self.trigger_timeout_ms = DEFAULT_TRIGGER_TIMEOUT_MS
+        self.flip_immediate = False
+        self._sequence_thread = None
         self._profile_operation_mode: dict[str, Any] = {}
 
         self.initUI()
@@ -504,6 +517,123 @@ class SLMGUI(QtWidgets.QMainWindow):
         if panel is not None:
             panel.refreshStatus()
 
+    @property
+    def sequenceIsLoaded(self) -> bool:
+        """True while a frame sequence is stored on the SLM controller: single-frame hologram updates are blocked."""
+        return self._sequence_is_loaded
+
+    @sequenceIsLoaded.setter
+    def sequenceIsLoaded(self, loaded: bool) -> None:
+        self._sequence_is_loaded = bool(loaded)
+        self._updateHologramUpdateButtons()
+
+    def _hologramUpdateButtons(self) -> list[QtWidgets.QPushButton]:
+        """Buttons that send a new hologram to the SLM: Run & display (left panel), Blank / From file... (Static mode)."""
+        buttons = [self._arbitrary.runBtn]
+        panel = getattr(self, "_operation_mode_panel", None)
+        if panel is not None:
+            static_page = panel.page(StaticMode)
+            buttons += [static_page.blankBtn, static_page.loadBtn]
+        return buttons
+
+    def _updateHologramUpdateButtons(self) -> None:
+        for button in self._hologramUpdateButtons():
+            if button.property("normalToolTip") is None:
+                button.setProperty("normalToolTip", button.toolTip())
+            button.setEnabled(not self._sequence_is_loaded)
+            button.setToolTip("Disabled while a frame sequence is loaded on the SLM" if self._sequence_is_loaded else button.property("normalToolTip"))
+        panel = getattr(self, "_operation_mode_panel", None)
+        if panel is not None:
+            panel.operationModeCB.setEnabled(not self._sequence_is_loaded)
+            panel.page(DynamicMode).setSequenceLoaded(self._sequence_is_loaded)
+
+    def sequenceIsRunning(self) -> bool:
+        """True from Arm until the sequence run has ended."""
+        return getattr(self, "_sequence_thread", None) is not None
+
+    def armSequence(self, patterns_rad: list[np.ndarray], paths: list[str]) -> bool:
+        """Dynamic mode Arm: compose one frame per hologram (current corrections), load them on the SLM and run.
+
+        Frame 0 is shown when armed; each trigger shows the next frame (after the last one, frame 0 again). The run
+        ends on Stop or when no trigger arrives within ``trigger_timeout_ms``. Returns False if it could not start.
+        """
+        if self.sequenceIsRunning():
+            return False
+        if not self.isSLMConnected():
+            QtWidgets.QMessageBox.warning(self, "Arm", "No SLM connected.\nConnect one first (Device ▸ Connect…).")
+            return False
+        shape = (param.ImgResY, param.ImgResX)
+        for index, pattern in enumerate(patterns_rad):
+            if np.shape(pattern) != shape:
+                QtWidgets.QMessageBox.warning(self, "Arm", f"Frame {index + 1} ({os.path.basename(paths[index])}) is {np.shape(pattern)}, the SLM needs {shape}.")
+                return False
+        thread = SequenceRunThread(self.SLM, patterns_rad, paths, self._frameTerms().copy(), self.trigger_timeout_ms, self.flip_immediate, self)
+        thread.armed.connect(lambda: self._sequenceArmed(thread))
+        thread.finished.connect(lambda: self._finishSequenceRun(thread))
+        self._sequence_thread = thread
+        self.sequenceIsLoaded = True
+        print(f"Arm: composing and loading {len(patterns_rad)} frames (trigger timeout {self.trigger_timeout_ms} ms, flip immediate {self.flip_immediate})")
+        thread.start()
+        return True
+
+    def stopSequence(self, wait: bool = False) -> None:
+        """End the sequence run after the current trigger wait (at most ``trigger_timeout_ms``); ``wait`` blocks until then."""
+        thread = getattr(self, "_sequence_thread", None)
+        if thread is None:
+            return
+        if not thread.stopRequested():
+            thread.requestStop()
+            print(f"Stop: the run ends after the current trigger wait (at most {thread.timeout_ms} ms)")
+        if wait:
+            thread.wait()
+            self._finishSequenceRun(thread)
+
+    def _sequenceArmed(self, thread: SequenceRunThread) -> None:
+        if thread is not self._sequence_thread:
+            return
+        self.dynamicIsReady = True
+        if thread.frames:
+            self.totalPhase = thread.frames[0]
+            self._preview._update_last_sent_preview()
+        print(f"Armed: {len(thread.frames)} frames on the SLM, frame 1 displayed; waiting for triggers")
+
+    def _finishSequenceRun(self, thread: SequenceRunThread) -> None:
+        if thread is not self._sequence_thread:
+            return
+        self._sequence_thread = None
+        result = thread.result
+        if result is not None and result.last_frame is not None and result.last_frame < len(thread.frames):
+            self.totalPhase = thread.frames[result.last_frame]
+            self.phasePattern = thread.patterns_rad[result.last_frame]
+            self._arbitrary._setHologramSource(thread.paths[result.last_frame])
+            self._preview._update_last_sent_preview()
+        self.dynamicIsReady = False
+        self.sequenceIsLoaded = False
+        if result is None:
+            print("Sequence run ended")
+            return
+        shown = "nothing displayed" if result.last_frame is None else f"frame {result.last_frame + 1} displayed"
+        detail = f" ({result.message})" if result.message else ""
+        if result.reason == RUN_NO_TRIGGER:
+            print(f"Sequence run ended: no trigger within {thread.timeout_ms} ms after {result.triggers} triggers; {shown}{detail}")
+        else:
+            print(f"Sequence run ended ({result.reason}) after {result.triggers} triggers; {shown}{detail}")
+        if result.reason == RUN_ERROR:
+            QtWidgets.QMessageBox.warning(self, "Sequence", f"The sequence run failed after {result.triggers} triggers:\n{result.message}\n\n{shown.capitalize()}.")
+
+    def _frameTerms(self) -> FrameTerms:
+        """Correction terms of the current GUI settings, added to every hologram sent to the SLM."""
+        pupil = self._pupilChkBx.isChecked()
+        return FrameTerms(
+            grating_rad=self.im_grating,
+            fresnel_rad=self.fresnelPhase,
+            wfc_rad=self.factory_lut if self._ManufacturerCorrectionChkBx.isChecked() and self.factory_lut is not None else None,
+            zernike_rad=self.im_zernike if self._zernikeCorrectionChkBx.isChecked() else None,
+            pupil_mask=self.pupil if pupil else None,
+            pupil_outside_rad=self.grating_out if pupil else None,
+            phase_levels=self.param_P,
+        )
+
     def isSLMConnected(self) -> bool:
         """True while an SLM session is open (the Blink SDK has no separate cable/presence check)."""
         return self.SLM is not None and self.SLM.connected
@@ -712,6 +842,9 @@ class SLMGUI(QtWidgets.QMainWindow):
         board = self.board
         if board is None or board == SIMULATED_BOARD:
             return
+        if self.sequenceIsRunning():
+            QtWidgets.QMessageBox.warning(self, "Set LUT", "A frame sequence is running on the SLM.\nStop it first (Dynamic mode ▸ Stop).")
+            return
         label = self._boardLabel(board)
         if findDevice(board) is None:
             QtWidgets.QMessageBox.warning(self, "Set LUT", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
@@ -762,6 +895,7 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     def disconnectSLM(self) -> None:
         """Close the SLM session. ``self.board`` is kept, so the profile and Device ▸ Connect… still refer to it."""
+        self.stopSequence(wait=True)
         slm, self.SLM = self.SLM, None
         self.factory_lut = None
         if slm is not None:
@@ -798,6 +932,18 @@ class SLMGUI(QtWidgets.QMainWindow):
             serial += f" (device list: {listed})"
         lines.append(f"Serial number: {serial}")
         lines.append(f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px, {slm.bit_depth} bit")
+        if self.sequenceIsRunning():
+            lines.append("Pixel pitch, temperature: not read while a frame sequence is running")
+        else:
+            lines += self._readDeviceInfoLines(slm)
+        lines.append(f"LUT: {'none loaded' if slm.lut_path is None else Path(slm.lut_path).stem}")
+        wfc = device.factory_lut if device is not None else ""
+        lines.append(f"WFC: {wfc if wfc and self.factory_lut is not None else 'none'}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _readDeviceInfoLines(slm: MeadowlarkSLM) -> list[str]:
+        lines = []
         try:
             pitch_um = slm.readPixelPitchUm()
             pitch = "not reported" if pitch_um is None else f"{pitch_um:g} µm"
@@ -809,10 +955,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             temperature = f"could not be read ({e})"
         lines.append(f"Temperature: {temperature}")
-        lines.append(f"LUT: {'none loaded' if slm.lut_path is None else Path(slm.lut_path).stem}")
-        wfc = device.factory_lut if device is not None else ""
-        lines.append(f"WFC: {wfc if wfc and self.factory_lut is not None else 'none'}")
-        return "\n".join(lines)
+        return lines
 
     def _showDeviceInfo(self) -> None:
         """Device ▸ Device info…: details of the connected SLM."""
@@ -1328,18 +1471,10 @@ class SLMGUI(QtWidgets.QMainWindow):
     def updatePhase(self) -> None:
         if self._suspend_phase_updates:
             return
-        self.totalPhase = self.im_grating + self.fresnelPhase + self.phasePattern
-
-        if self._ManufacturerCorrectionChkBx.isChecked() and self.factory_lut is not None:
-            self.totalPhase = self.totalPhase + self.factory_lut
-        if self._zernikeCorrectionChkBx.isChecked():
-            self.totalPhase = self.totalPhase + self.im_zernike
-        if self._pupilChkBx.isChecked():
-            self._advanced.applyPupil()
-
-        self.totalPhase = np.mod(self.totalPhase, 2 * np.pi)
-
-        self.totalPhase = np.round(self.param_P * self.totalPhase / (2 * np.pi)).astype("uint8")
+        if self._sequence_is_loaded:
+            print("Hologram not sent: a frame sequence is loaded on the SLM")
+            return
+        self.totalPhase = composeSlmFrame(self.phasePattern, self._frameTerms())
         if self.SLM is not None:
             self.SLM.uploadHologram(self.totalPhase)
         self._publish_static_changes()
@@ -1349,6 +1484,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     def __del__(self) -> None:
         plt.close("all")
         print("closing all")
+        self.stopSequence(wait=True)
         slm, self.SLM = getattr(self, "SLM", None), None
         if slm is not None:
             slm.disconnect()

@@ -9,6 +9,9 @@ when opening the device, then :meth:`MeadowlarkSLM.uploadHologram` for each fram
 :meth:`MeadowlarkSLM.disconnect` when shutting down. Per-frame work is only Write_image +
 ImageWriteComplete; Create_SDK / Load_LUT / Delete_SDK run once per session.
 
+Sequence mode (1k only): :meth:`MeadowlarkSLM.loadSequence` stores up to 752 frames on the controller
+(Load_sequence), :meth:`MeadowlarkSLM.selectFrame` shows a stored frame, on a trigger if requested (Select_image).
+
 For offline testing without hardware, create it with ``simulate=True`` (the GUI does this when the
 Simulated SLM is selected in the device list). Uploads stay in memory and temperature returns a stub
 value. Simulation is never selected automatically.
@@ -17,8 +20,9 @@ value. Simulation is never selected automatically.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, Sequence
 
 import numpy as np
 from ctypes import CDLL, POINTER, byref, c_char_p, c_double, c_int, c_ubyte, c_uint
@@ -30,6 +34,7 @@ BLINK_DLL: Path = Path(r"C:\Program Files\Meadowlark Optics\Blink OverDrive Plus
 BOARD: int = 1
 SLM_BIT_DEPTH: int = 8  # 8-bit frames; manual lists 8 for 512, 12 for 1920 — use 8 for 1024×1024 8-bit API
 TRIGGER_TIMEOUT_MS: int = 5000
+MAX_SEQUENCE_FRAMES: int = 752
 # Nominal Meadowlark operating temperature used by the offline stub (°C).
 SIMULATED_TEMPERATURE_C: float = 33.0
 
@@ -116,7 +121,9 @@ class MeadowlarkSLM:
     # --- Session ---
     _dll: CDLL | None  # loaded DLL; None when disconnected or simulated
     _connected: bool
+    sequence_length: int | None  # frames stored on the controller by loadSequence; None = none
     _last_image: np.ndarray | None  # last frame in simulate mode
+    _simulated_sequence: np.ndarray | None  # (n, height, width) frames of loadSequence in simulate mode
 
     def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path | None = None, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None, expected_shape: tuple[int, int] | None = None) -> None:
         self.board = board
@@ -129,9 +136,11 @@ class MeadowlarkSLM:
         self.serial = None
         self.image_shape = None
         self.bit_depth = None
+        self.sequence_length = None
         self._dll = None
         self._connected = False
         self._last_image = None
+        self._simulated_sequence = None
 
     @property
     def dll(self) -> CDLL | None:
@@ -244,9 +253,11 @@ class MeadowlarkSLM:
         finally:
             self._dll = None
             self._last_image = None
+            self._simulated_sequence = None
             self.serial = None
             self.image_shape = None
             self.bit_depth = None
+            self.sequence_length = None
             self._connected = False
             if MeadowlarkSLM._active is self:
                 MeadowlarkSLM._active = None
@@ -282,6 +293,8 @@ class MeadowlarkSLM:
 
         if self.simulate:
             self._last_image = np.array(image_u8, copy=True)
+            self._simulated_sequence = None
+            self.sequence_length = None
             return
 
         if self._dll is None:
@@ -291,6 +304,7 @@ class MeadowlarkSLM:
         flat: np.ndarray = np.ascontiguousarray(image_u8.ravel(order="C"))
         buf = flat.ctypes.data_as(POINTER(c_ubyte))
 
+        self.sequence_length = None
         rc: int = dll.Write_image(self.board, buf, flat.size, 0, 0, 0, 0, TRIGGER_TIMEOUT_MS)
         if rc != 0:
             raise RuntimeError(f"Write_image returned {rc}")
@@ -298,6 +312,95 @@ class MeadowlarkSLM:
         rc = dll.ImageWriteComplete(self.board, TRIGGER_TIMEOUT_MS)
         if rc != 0:
             raise RuntimeError(f"ImageWriteComplete returned {rc}")
+
+    def loadSequence(self, frames: Sequence[np.ndarray] | np.ndarray) -> None:
+        """Store frames 0 … n-1 on the controller (Load_sequence, 1k only); each frame is (height, width) uint8.
+
+        Nothing is shown until :meth:`selectFrame`. Single-frame uploads (:meth:`uploadHologram`) discard the sequence.
+        """
+        if not self._connected:
+            raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before loading a sequence.")
+        stack: np.ndarray = self._frameStack(frames)
+        n_frames: int = stack.shape[0]
+
+        if self.simulate:
+            self._simulated_sequence = stack
+            self.sequence_length = n_frames
+            return
+
+        dll: CDLL | None = self._dll
+        if dll is None:
+            raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before loading a sequence.")
+        if not hasattr(dll, "Load_sequence") or not hasattr(dll, "Select_image"):
+            raise RuntimeError("The Blink DLL has no Load_sequence / Select_image: sequence mode is not available.")
+
+        frame_size: int = stack.shape[1] * stack.shape[2]
+        buf = stack.ctypes.data_as(POINTER(c_ubyte))
+        self.sequence_length = None
+        rc: int = dll.Load_sequence(self.board, buf, frame_size, n_frames, 0, 0, 0, 0, TRIGGER_TIMEOUT_MS)
+        if rc != 0:
+            raise RuntimeError(f"Load_sequence returned {rc}. {self._last_error(dll)}")
+        self.sequence_length = n_frames
+
+    def selectFrame(self, frame: int, *, wait_for_trigger: bool = True, timeout_ms: int = TRIGGER_TIMEOUT_MS, flip_immediate: bool = False, output_pulse: bool = False) -> bool:
+        """Show stored frame ``frame`` (Select_image), on the next trigger if ``wait_for_trigger``.
+
+        Select_image only arms the frame; ImageWriteComplete then waits until it is shown (the trigger arrived) or
+        ``timeout_ms`` passes, as for Write_image. Returns True if shown, False if the SDK reports failure or the wait
+        took ``timeout_ms`` or longer (with a trigger: no trigger in time; see :meth:`lastErrorMessage`).
+        ``output_pulse`` sends the output pulse when the frame flips. In simulate mode no trigger ever arrives:
+        with ``wait_for_trigger`` it waits ``timeout_ms`` and returns False.
+        """
+        if not self._connected:
+            raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before selecting a frame.")
+        if self.sequence_length is None:
+            raise RuntimeError("No frame sequence loaded. Call MeadowlarkSLM.loadSequence() first.")
+        frame = int(frame)
+        if not 0 <= frame < self.sequence_length:
+            raise ValueError(f"Frame {frame} out of range: the sequence has {self.sequence_length} frames (0 … {self.sequence_length - 1}).")
+        timeout_ms = int(timeout_ms)
+        if timeout_ms < 0:
+            raise ValueError(f"timeout_ms must be >= 0, got {timeout_ms}")
+
+        if self.simulate:
+            if wait_for_trigger:
+                time.sleep(timeout_ms / 1000)
+                return False
+            self._last_image = np.array(self._simulated_sequence[frame], copy=True)
+            return True
+
+        dll: CDLL | None = self._dll
+        if dll is None:
+            raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before selecting a frame.")
+        start_s = time.perf_counter()
+        rc: int = dll.Select_image(self.board, frame, int(bool(wait_for_trigger)), int(bool(flip_immediate)), int(bool(output_pulse)), 0, timeout_ms)
+        if rc != 0:
+            return False
+        rc = dll.ImageWriteComplete(self.board, timeout_ms)
+        if rc != 0:
+            return False
+        elapsed_ms = (time.perf_counter() - start_s) * 1000
+        return not (wait_for_trigger and elapsed_ms >= timeout_ms)
+
+    def lastErrorMessage(self) -> str:
+        """Last error text of the SDK (Get_last_error_message); empty in simulate mode or if not available."""
+        if self.simulate or self._dll is None:
+            return ""
+        return self._last_error(self._dll)
+
+    def _frameStack(self, frames: Sequence[np.ndarray] | np.ndarray) -> np.ndarray:
+        if isinstance(frames, np.ndarray):
+            stack: np.ndarray = np.asarray(frames, dtype=np.uint8)
+        elif len(frames) == 0:
+            raise ValueError(f"A sequence holds 1 … {MAX_SEQUENCE_FRAMES} frames, got 0")
+        else:
+            stack = np.stack([np.asarray(f, dtype=np.uint8) for f in frames])
+        stack = np.ascontiguousarray(stack)
+        if stack.ndim != 3 or stack.shape[1:] != self.image_shape:
+            raise ValueError(f"Expected frames of shape {self.image_shape}, got {stack.shape[1:] if stack.ndim == 3 else stack.shape}")
+        if not 1 <= stack.shape[0] <= MAX_SEQUENCE_FRAMES:
+            raise ValueError(f"A sequence holds 1 … {MAX_SEQUENCE_FRAMES} frames, got {stack.shape[0]}")
+        return stack
 
     def getLastHologram(self) -> np.ndarray | None:
         """Copy of the last frame in simulate mode, or None."""
@@ -360,6 +463,14 @@ class MeadowlarkSLM:
 
         dll.Read_SLM_temperature.argtypes = [c_int]
         dll.Read_SLM_temperature.restype = c_double
+
+        if hasattr(dll, "Load_sequence"):
+            dll.Load_sequence.argtypes = [c_int, POINTER(c_ubyte), c_uint, c_int, c_int, c_int, c_int, c_int, c_uint]
+            dll.Load_sequence.restype = c_int
+
+        if hasattr(dll, "Select_image"):
+            dll.Select_image.argtypes = [c_int, c_int, c_int, c_int, c_int, c_int, c_uint]
+            dll.Select_image.restype = c_int
 
         if hasattr(dll, "Read_Serial_Number"):
             dll.Read_Serial_Number.argtypes = [c_int]
