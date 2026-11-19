@@ -16,9 +16,6 @@ if TYPE_CHECKING:
 
     from gui.main_window import SLMGUI
 
-SLOT_KEEP_UNTIL_NEXT_TRIGGER: str = 'keep until next trig'
-SLOT_START_STOP: str = 'make start-stop'
-SLOT_TIMINGS: tuple[str, ...] = (SLOT_KEEP_UNTIL_NEXT_TRIGGER, SLOT_START_STOP)
 
 DYNAMIC_READY_TEXT: str = 'Ready'
 DYNAMIC_EDITING_TEXT: str = 'Editing'
@@ -79,18 +76,13 @@ class StaticMode(OperationMode):
 
 @dataclass
 class HologramSlot:
-    """One entry of the dynamic hologram list (paths and contents are None until loaded).
+    """One frame of the dynamic hologram list: the file it was loaded from and its contents (None until loaded).
 
-    ``timing`` is one of SLOT_TIMINGS. With SLOT_START_STOP the entry also has a stop hologram; it is kept
-    (but unused) when the timing is switched back. ``data`` / ``stop_data`` are the hologram file's dict:
-    a ``.pkl`` traps_dict, or ``{'phasePattern': array}`` for ``.npy`` / ``.bmp``.
+    ``data`` is the hologram file's dict: a ``.pkl`` traps_dict, or ``{'phasePattern': array}`` for ``.npy`` / ``.bmp``.
     """
 
     path: str | None = None
     data: dict[str, Any] | None = None
-    timing: str = SLOT_KEEP_UNTIL_NEXT_TRIGGER
-    stop_path: str | None = None
-    stop_data: dict[str, Any] | None = None
 
 
 class DynamicMode(OperationMode):
@@ -126,18 +118,6 @@ class DynamicMode(OperationMode):
         slot = self.holograms[index]
         slot.path = path
         slot.data = data
-
-    def setStopHologram(self, index: int, path: str, data: dict[str, Any]) -> None:
-        """Store the stop hologram loaded from ``path`` in slot ``index``."""
-        slot = self.holograms[index]
-        slot.stop_path = path
-        slot.stop_data = data
-
-    def setTiming(self, index: int, timing: str) -> None:
-        """Set the timing of slot ``index`` (one of SLOT_TIMINGS)."""
-        if timing not in SLOT_TIMINGS:
-            raise ValueError('unknown timing %r' % timing)
-        self.holograms[index].timing = timing
 
 
 OPERATION_MODES: tuple[type[OperationMode], ...] = (StaticMode, DynamicMode)

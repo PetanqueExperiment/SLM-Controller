@@ -83,12 +83,12 @@ def hw(tmp_path, monkeypatch):
 
 
 def test_simulate_round_trip():
-    slm = MeadowlarkSLM(simulate=True, image_shape=SHAPE)
+    slm = MeadowlarkSLM(simulate=True, expected_shape=SHAPE)
     slm.connect()
     try:
         frame = np.full((H, W), 7, dtype=np.uint8)
         slm.uploadHologram(frame)
-        assert slm.isSimulated() and slm.serial is None
+        assert slm.connected and slm.simulate and slm.serial is None
         assert slm.readTemperature() == slm_module.SIMULATED_TEMPERATURE_C
         assert np.array_equal(slm.getLastHologram(), frame)
     finally:
@@ -137,7 +137,7 @@ def test_missing_lut_fails_before_sdk(hw, tmp_path):
 
 
 def test_only_one_connected_instance():
-    a, b = MeadowlarkSLM(simulate=True, image_shape=SHAPE), MeadowlarkSLM(2, simulate=True, image_shape=SHAPE)
+    a, b = MeadowlarkSLM(simulate=True, expected_shape=SHAPE), MeadowlarkSLM(2, simulate=True, expected_shape=SHAPE)
     a.connect()
     try:
         with pytest.raises(RuntimeError, match="already in use"):
@@ -224,7 +224,7 @@ def test_upload_uses_own_board(hw):
 
 def test_no_hard_coded_lut_or_wfc():
     assert not hasattr(slm_module, "LUT_FILE") and not hasattr(slm_module, "WFC_FILE")
-    assert MeadowlarkSLM(simulate=True, image_shape=SHAPE).lut_path is None
+    assert MeadowlarkSLM(simulate=True, expected_shape=SHAPE).lut_path is None
 
 
 def _write_lut(path, levels=256):
@@ -265,7 +265,7 @@ def test_load_lut_reloads_controller(hw, tmp_path):
 
 def test_load_lut_requires_connection_and_simulate_only_remembers(tmp_path):
     new_lut = _write_lut(tmp_path / "other.LUT")
-    slm = MeadowlarkSLM(simulate=True, image_shape=SHAPE)
+    slm = MeadowlarkSLM(simulate=True, expected_shape=SHAPE)
     with pytest.raises(RuntimeError):
         slm.loadLut(new_lut)
     slm.connect()
@@ -280,29 +280,29 @@ def test_image_size_is_read_from_hardware(hw):
     fake = FakeBlinkDLL(width=1920, height=1152, depth=12)
     slm = hw(fake)
     slm.connect()
-    assert (slm.width, slm.height, slm.bit_depth) == (1920, 1152, 12)
+    assert (slm.image_shape, slm.bit_depth) == ((1152, 1920), 12)
     slm.uploadHologram(np.zeros((1152, 1920), dtype=np.uint8))
     assert fake.written_sizes == [1920 * 1152]
     with pytest.raises(ValueError, match="1152, 1920"):
         slm.uploadHologram(np.zeros((H, W), dtype=np.uint8))
     slm.disconnect()
-    assert slm.width is None and slm.height is None
+    assert slm.image_shape is None and slm.bit_depth is None
 
 
 def test_size_mismatch_refuses_before_lut(hw):
     fake = FakeBlinkDLL(width=1920, height=1152)
-    slm = hw(fake, image_shape=SHAPE)
+    slm = hw(fake, expected_shape=SHAPE)
     with pytest.raises(SlmSizeMismatchError, match="1920 x 1152"):
         slm.connect()
     assert "Load_LUT_file(1)" not in fake.calls and fake.calls[-1] == "Delete_SDK"
-    assert not slm.connected and slm.width is None
+    assert not slm.connected and slm.image_shape is None
 
 
 def test_matching_size_connects(hw):
     fake = FakeBlinkDLL()
-    slm = hw(fake, image_shape=SHAPE)
+    slm = hw(fake, expected_shape=SHAPE)
     slm.connect()
-    assert slm.connected and (slm.height, slm.width) == SHAPE
+    assert slm.connected and slm.image_shape == SHAPE
 
 
 @pytest.mark.parametrize("kwargs", [dict(has_geometry=False), dict(width=0), dict(height=-1)])
@@ -314,16 +314,25 @@ def test_missing_or_implausible_size_refuses(hw, kwargs):
     assert not slm.connected and fake.calls[-1] == "Delete_SDK"
 
 
-def test_simulate_needs_image_shape():
-    with pytest.raises(ValueError, match="image_shape"):
+def test_simulate_needs_expected_shape():
+    with pytest.raises(ValueError, match="expected_shape"):
         MeadowlarkSLM(simulate=True).connect()
-    slm = MeadowlarkSLM(simulate=True, image_shape=(600, 800))
+    slm = MeadowlarkSLM(simulate=True, expected_shape=(600, 800))
     slm.connect()
     try:
-        assert (slm.height, slm.width) == (600, 800)
+        assert slm.image_shape == (600, 800)
         slm.uploadHologram(np.zeros((600, 800), dtype=np.uint8))
     finally:
         slm.disconnect()
+
+
+def test_image_shape_only_while_connected(hw):
+    slm = hw(FakeBlinkDLL(), expected_shape=SHAPE)
+    assert slm.image_shape is None and slm.expected_shape == SHAPE
+    slm.connect()
+    assert slm.image_shape == SHAPE
+    slm.disconnect()
+    assert slm.image_shape is None and slm.expected_shape == SHAPE
 
 
 def test_no_hard_coded_frame_size():
@@ -339,7 +348,7 @@ def test_read_pixel_pitch(hw):
         slm.readPixelPitchUm()
     slm.connect()
     assert slm.readPixelPitchUm() == 17.0
-    sim = MeadowlarkSLM(2, simulate=True, image_shape=SHAPE)
+    sim = MeadowlarkSLM(2, simulate=True, expected_shape=SHAPE)
     slm.disconnect()
     sim.connect()
     try:

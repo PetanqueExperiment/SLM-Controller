@@ -10,7 +10,7 @@ import pytest
 
 from gui import hologram_handler
 from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES
-from gui.panels.modes.logic import DYNAMIC_EDITING_TEXT, DYNAMIC_READY_TEXT, SLOT_KEEP_UNTIL_NEXT_TRIGGER, SLOT_START_STOP, DynamicMode, HologramSlot, OperationMode, StaticMode, ordinal, readHologramFile
+from gui.panels.modes.logic import DYNAMIC_EDITING_TEXT, DYNAMIC_READY_TEXT, DynamicMode, HologramSlot, OperationMode, StaticMode, ordinal, readHologramFile
 
 
 @pytest.mark.parametrize('n, text', [(1, '1st'), (2, '2nd'), (3, '3rd'), (4, '4th'), (11, '11th'), (12, '12th'), (13, '13th'), (21, '21st'), (102, '102nd'), (111, '111th')])
@@ -27,20 +27,6 @@ def test_dynamic_hologram_list():
     assert mode.holograms[1] == HologramSlot('a.pkl', {'phasePattern': 0})
     assert mode.removeLastSlot() is True
     assert [s.path for s in mode.holograms] == [None, 'a.pkl']
-
-
-def test_dynamic_slot_timing_and_stop_hologram():
-    mode = DynamicMode()
-    slot = mode.holograms[0]
-    assert slot.timing == SLOT_KEEP_UNTIL_NEXT_TRIGGER and slot.stop_path is None
-    mode.setTiming(0, SLOT_START_STOP)
-    mode.setStopHologram(0, 'stop.pkl', {'phasePattern': 1})
-    mode.setHologram(0, 'start.pkl', {'phasePattern': 2})
-    assert (slot.path, slot.stop_path, slot.timing) == ('start.pkl', 'stop.pkl', SLOT_START_STOP)
-    mode.setTiming(0, SLOT_KEEP_UNTIL_NEXT_TRIGGER)
-    assert slot.stop_path == 'stop.pkl'
-    with pytest.raises(ValueError):
-        mode.setTiming(0, 'sometimes')
 
 
 def test_modes_and_default():

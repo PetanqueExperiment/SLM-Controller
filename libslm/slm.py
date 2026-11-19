@@ -91,42 +91,51 @@ class SlmSizeMismatchError(RuntimeError):
 
 
 class MeadowlarkSLM:
-    """One Meadowlark SLM on a Blink PCIe board.
+    """One Meadowlark SLM on a Blink PCIe board. Only one instance can be connected per process (one SDK session).
 
-    The Blink SDK is a single instance per process (Create_SDK / Delete_SDK are global in the DLL),
-    so only one MeadowlarkSLM may be connected at a time.
-
-    If ``expected_serial`` is given, :meth:`connect` reads the serial number right after Create_SDK, before the LUT
-    or any image reaches the SLM. On a mismatch it calls ``on_serial_mismatch(expected, actual)``: True continues
-    connecting, False (or no callback) closes the SDK again and raises SerialMismatchError.
-
-    The image size is read from the hardware at connect (Get_image_width / Get_image_height) and stored as
-    ``width`` / ``height``; frames must have that shape. If ``image_shape`` = (height, width) is given and the hardware
-    differs, :meth:`connect` raises SlmSizeMismatchError before the LUT or any image reaches the SLM. In simulate mode
-    there is no hardware, so ``image_shape`` is required and becomes the size.
+    Before the LUT or any image reaches the SLM, connect checks the serial number (``expected_serial``) and the
+    image size (``expected_shape``).
     """
 
-    _active: ClassVar[MeadowlarkSLM | None] = None
+    _active: ClassVar[MeadowlarkSLM | None] = None  # the connected instance
 
-    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path | None = None, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None, image_shape: tuple[int, int] | None = None) -> None:
-        self.board: int = board
-        self.dll_path: Path = dll_path
-        self.lut_path: Path | None = lut_path
-        self.simulate: bool = simulate
-        self.expected_serial: int | None = expected_serial
-        self.on_serial_mismatch: Callable[[int, int], bool] | None = on_serial_mismatch
-        self.serial: int | None = None
-        self.image_shape: tuple[int, int] | None = None if image_shape is None else (int(image_shape[0]), int(image_shape[1]))
-        self.width: int | None = None
-        self.height: int | None = None
-        self.bit_depth: int | None = None
-        self._dll: CDLL | None = None
-        self._connected: bool = False
-        self._last_image: np.ndarray | None = None
+    # --- Configuration ---
+    board: int  # Blink PCIe board number
+    dll_path: Path  # Blink_C_wrapper.dll
+    lut_path: Path | None  # LUT loaded at connect; None = none
+    simulate: bool  # no hardware, frames kept in memory
+    expected_serial: int | None  # serial number from the device list; None = not checked
+    on_serial_mismatch: Callable[[int, int], bool] | None  # (expected, actual) -> continue?
+    expected_shape: tuple[int, int] | None  # (height, width) [px]; None = not checked; required in simulate mode
+
+    # --- Read from the SLM at connect (None when disconnected) ---
+    serial: int | None
+    image_shape: tuple[int, int] | None  # (height, width) [px]
+    bit_depth: int | None
+
+    # --- Session ---
+    _dll: CDLL | None  # loaded DLL; None when disconnected or simulated
+    _connected: bool
+    _last_image: np.ndarray | None  # last frame in simulate mode
+
+    def __init__(self, board: int = BOARD, *, dll_path: Path = BLINK_DLL, lut_path: Path | None = None, simulate: bool = False, expected_serial: int | None = None, on_serial_mismatch: Callable[[int, int], bool] | None = None, expected_shape: tuple[int, int] | None = None) -> None:
+        self.board = board
+        self.dll_path = dll_path
+        self.lut_path = lut_path
+        self.simulate = simulate
+        self.expected_serial = expected_serial
+        self.on_serial_mismatch = on_serial_mismatch
+        self.expected_shape = None if expected_shape is None else (int(expected_shape[0]), int(expected_shape[1]))
+        self.serial = None
+        self.image_shape = None
+        self.bit_depth = None
+        self._dll = None
+        self._connected = False
+        self._last_image = None
 
     @property
     def dll(self) -> CDLL | None:
-        """The loaded Blink_C_wrapper.dll, or None when not connected or simulated."""
+        """Loaded DLL; None when disconnected or simulated."""
         return self._dll
 
     @property
@@ -134,10 +143,7 @@ class MeadowlarkSLM:
         return self._connected
 
     def connect(self) -> None:
-        """Load the DLL, Create_SDK, check the serial number and image size, then Load_LUT_file if a LUT is set.
-
-        Safe to call again if already connected.
-        """
+        """Create_SDK, check serial number and image size, Load_LUT_file (if set). No-op if already connected."""
         if self._connected:
             return
         active = MeadowlarkSLM._active
@@ -145,12 +151,12 @@ class MeadowlarkSLM:
             raise RuntimeError(f"Meadowlark SDK already in use by board {active.board}. Disconnect it first.")
 
         if self.simulate:
-            if self.image_shape is None:
-                raise ValueError("Simulated SLM needs image_shape = (height, width): there is no hardware to ask.")
+            if self.expected_shape is None:
+                raise ValueError("Simulated SLM needs expected_shape = (height, width): there is no hardware to ask.")
             self._dll = None
             self._last_image = None
             self.serial = None
-            self.height, self.width = self.image_shape
+            self.image_shape = self.expected_shape
             self.bit_depth = SLM_BIT_DEPTH
             self._connected = True
             MeadowlarkSLM._active = self
@@ -182,11 +188,12 @@ class MeadowlarkSLM:
                     raise SerialMismatchError(self.board, self.expected_serial, self.serial)
 
             width, height, depth = self._read_image_geometry(dll, self.board)
-            if self.image_shape is not None and (height, width) != self.image_shape:
-                raise SlmSizeMismatchError(self.board, self.image_shape, (height, width))
+            if self.expected_shape is not None and (height, width) != self.expected_shape:
+                raise SlmSizeMismatchError(self.board, self.expected_shape, (height, width))
             if depth != SLM_BIT_DEPTH:
                 print(f"Board {self.board}: Get_image_depth reports {depth} bit; frames are sent as {SLM_BIT_DEPTH}-bit images.")
-            self.width, self.height, self.bit_depth = width, height, depth
+            self.image_shape = (height, width)
+            self.bit_depth = depth
 
             if self.lut_path is not None:
                 lut_bytes: bytes = str(self.lut_path.resolve()).encode("utf-8")
@@ -205,15 +212,13 @@ class MeadowlarkSLM:
                     pass
             self._dll = None
             self.serial = None
-            self.width = self.height = self.bit_depth = None
+            self.image_shape = None
+            self.bit_depth = None
             self._connected = False
             raise
 
     def loadLut(self, lut_path: Path) -> None:
-        """Load another LUT file into the controller of the connected board (Load_LUT_file) and remember it.
-
-        In simulate mode only the path is remembered. Raises if not connected, the file is missing, or the SDK fails.
-        """
+        """Load another LUT into the connected controller (in simulate mode only remember the path)."""
         if not self._connected:
             raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before loading a LUT.")
         if not lut_path.is_file():
@@ -230,7 +235,7 @@ class MeadowlarkSLM:
         self.lut_path = lut_path
 
     def disconnect(self) -> None:
-        """Delete_SDK and release session state."""
+        """Delete_SDK and reset the session."""
         if not self._connected:
             return
         try:
@@ -240,17 +245,14 @@ class MeadowlarkSLM:
             self._dll = None
             self._last_image = None
             self.serial = None
-            self.width = self.height = self.bit_depth = None
+            self.image_shape = None
+            self.bit_depth = None
             self._connected = False
             if MeadowlarkSLM._active is self:
                 MeadowlarkSLM._active = None
 
-    def isSimulated(self) -> bool:
-        """True when the current session is the offline stub (no real SLM writes)."""
-        return self.simulate and self._connected
-
     def readPixelPitchUm(self) -> float | None:
-        """Pixel pitch reported by the hardware (Get_pixel_pitch) in µm; None in simulate mode or if not available."""
+        """Pixel pitch from the SLM [µm]; None in simulate mode or if not reported."""
         if not self._connected:
             raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before reading the pixel pitch.")
         if self.simulate or self._dll is None or not hasattr(self._dll, "Get_pixel_pitch"):
@@ -259,7 +261,7 @@ class MeadowlarkSLM:
         return pitch_um if pitch_um > 0 else None
 
     def readTemperature(self) -> float:
-        """Return the SLM temperature in degrees Celsius. Requires :meth:`connect` first."""
+        """SLM temperature [°C]."""
         if not self._connected:
             raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before reading temperature.")
         if self.simulate:
@@ -269,16 +271,12 @@ class MeadowlarkSLM:
         return float(self._dll.Read_SLM_temperature(self.board))
 
     def uploadHologram(self, image_u8: np.ndarray) -> None:
-        """Send a single (height, width) uint8 frame to the SLM (blocking). Requires :meth:`connect` first.
-
-        In simulate mode the frame is stored in memory (see :meth:`getLastHologram`) and not sent
-        to hardware.
-        """
+        """Send one (height, width) uint8 frame and wait until written (simulate mode: keep it in memory)."""
         if not self._connected:
             raise RuntimeError("Meadowlark SDK not connected. Call MeadowlarkSLM.connect() before upload.")
 
-        if image_u8.shape != (self.height, self.width):
-            raise ValueError(f"Expected shape ({self.height}, {self.width}), got {image_u8.shape}")
+        if image_u8.shape != self.image_shape:
+            raise ValueError(f"Expected shape {self.image_shape}, got {image_u8.shape}")
         if image_u8.dtype != np.uint8:
             image_u8 = np.asarray(image_u8, dtype=np.uint8)
 
@@ -293,7 +291,7 @@ class MeadowlarkSLM:
         flat: np.ndarray = np.ascontiguousarray(image_u8.ravel(order="C"))
         buf = flat.ctypes.data_as(POINTER(c_ubyte))
 
-        rc: int = dll.Write_image(self.board, buf, self.height * self.width, 0, 0, 0, 0, TRIGGER_TIMEOUT_MS)
+        rc: int = dll.Write_image(self.board, buf, flat.size, 0, 0, 0, 0, TRIGGER_TIMEOUT_MS)
         if rc != 0:
             raise RuntimeError(f"Write_image returned {rc}")
 
@@ -302,14 +300,14 @@ class MeadowlarkSLM:
             raise RuntimeError(f"ImageWriteComplete returned {rc}")
 
     def getLastHologram(self) -> np.ndarray | None:
-        """Return a copy of the last simulated upload, or None if none / not in simulate mode."""
+        """Copy of the last frame in simulate mode, or None."""
         if self._last_image is None:
             return None
         return np.array(self._last_image, copy=True)
 
     @staticmethod
     def _read_serial(dll: CDLL, board: int) -> int | None:
-        """Serial number reported by Read_Serial_Number(board), or None if the DLL lacks it or reports failure (-1)."""
+        """Serial number; None if not available or -1."""
         if not hasattr(dll, "Read_Serial_Number"):
             return None
         serial: int = dll.Read_Serial_Number(board)
@@ -317,7 +315,7 @@ class MeadowlarkSLM:
 
     @staticmethod
     def _read_image_geometry(dll: CDLL, board: int) -> tuple[int, int, int]:
-        """(width, height, bit depth) reported by the hardware; raises RuntimeError if not available or not positive."""
+        """(width, height, bit depth) from the SLM; raises if not available or not positive."""
         names = ("Get_image_width", "Get_image_height", "Get_image_depth")
         missing = [name for name in names if not hasattr(dll, name)]
         if missing:
@@ -339,37 +337,30 @@ class MeadowlarkSLM:
         dll_dir: str = str(dll_path.parent)
         if hasattr(os, "add_dll_directory"):
             os.add_dll_directory(dll_dir)
-        # Also help legacy PATH resolution for transitive DLLs
         os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
         return CDLL(str(dll_path))
 
     @staticmethod
     def _bind_blink_api(dll: CDLL) -> None:
-        # void Create_SDK(unsigned int, unsigned int*, int*, int, int, int, int, char*)
+        """ctypes signatures from Blink_C_wrapper.h."""
         dll.Create_SDK.argtypes = [c_uint, POINTER(c_uint), POINTER(c_int), c_int, c_int, c_int, c_int, c_char_p]
         dll.Create_SDK.restype = None
 
-        # int Load_LUT_file(int board, char* LUT_file)
         dll.Load_LUT_file.argtypes = [c_int, c_char_p]
         dll.Load_LUT_file.restype = c_int
 
-        # int Write_image(int board, unsigned char* image, unsigned int image_size, ...)
         dll.Write_image.argtypes = [c_int, POINTER(c_ubyte), c_uint, c_int, c_int, c_int, c_int, c_uint]
         dll.Write_image.restype = c_int
 
-        # int ImageWriteComplete(int board, unsigned int trigger_timeout_ms)
         dll.ImageWriteComplete.argtypes = [c_int, c_uint]
         dll.ImageWriteComplete.restype = c_int
 
-        # void Delete_SDK()
         dll.Delete_SDK.argtypes = []
         dll.Delete_SDK.restype = None
 
-        # double Read_SLM_temperature(int board)
         dll.Read_SLM_temperature.argtypes = [c_int]
         dll.Read_SLM_temperature.restype = c_double
 
-        # int Read_Serial_Number(int board)  (-1 on failure; signature as used by slmsuite, not yet checked against Blink_C_wrapper.h)
         if hasattr(dll, "Read_Serial_Number"):
             dll.Read_Serial_Number.argtypes = [c_int]
             dll.Read_Serial_Number.restype = c_int

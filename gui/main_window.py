@@ -380,7 +380,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         if not lut_ok:
             return False
         try:
-            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, lut_path=lut_path, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act), image_shape=(param.ImgResY, param.ImgResX))
+            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, lut_path=lut_path, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act), expected_shape=(param.ImgResY, param.ImgResX))
             slm.connect()
         except SerialMismatchError as e:
             print(f"Connection aborted: {e} Nothing was sent to the SLM.")
@@ -789,7 +789,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             return None
         lines = [self._boardLabel(self.board)]
         if slm.simulate:
-            lines += ["No hardware (simulate mode).", f"Image: {slm.width} x {slm.height} px (from parameters.json)", "LUT: none", "WFC: none"]
+            lines += ["No hardware (simulate mode).", f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px (from parameters.json)", "LUT: none", "WFC: none"]
             return "\n".join(lines)
         device = findDevice(self.board)
         listed = None if device is None else device.serial
@@ -797,7 +797,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         if listed is not None and listed != slm.serial:
             serial += f" (device list: {listed})"
         lines.append(f"Serial number: {serial}")
-        lines.append(f"Image: {slm.width} x {slm.height} px, {slm.bit_depth} bit")
+        lines.append(f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px, {slm.bit_depth} bit")
         try:
             pitch_um = slm.readPixelPitchUm()
             pitch = "not reported" if pitch_um is None else f"{pitch_um:g} µm"

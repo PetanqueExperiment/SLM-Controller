@@ -48,7 +48,7 @@ def main():
     print("DLL:", comm.BLINK_DLL, "(found)" if comm.BLINK_DLL.is_file() else "(MISSING)")
     print("LUT:", "none (use --lut)" if args.lut is None else f"{args.lut} {'(found)' if args.lut.is_file() else '(MISSING)'}")
     print("Board:", comm.BOARD)
-    slm = MeadowlarkSLM(comm.BOARD, simulate=args.simulate, lut_path=args.lut, image_shape=(param.ImgResY, param.ImgResX) if args.simulate else None)
+    slm = MeadowlarkSLM(comm.BOARD, simulate=args.simulate, lut_path=args.lut, expected_shape=(param.ImgResY, param.ImgResX) if args.simulate else None)
 
     t0 = time.perf_counter()
     try:
@@ -56,7 +56,7 @@ def main():
     except Exception as e:
         print(f"\nFAILED to connect: {type(e).__name__}: {e}")
         return 1
-    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if slm.isSimulated() else ''}")
+    print(f"\nConnected in {time.perf_counter() - t0:.2f} s{' (SIMULATE)' if slm.simulate else ''}")
 
     all_ok = True
     try:
@@ -70,7 +70,7 @@ def main():
             print("\nDevice vs configuration:")
             all_ok &= _check("width", width, param.ImgResX)
             all_ok &= _check("height", height, param.ImgResY)
-            all_ok &= _check("driver W x H", f"{width}x{height}", f"{slm.width}x{slm.height}")
+            all_ok &= _check("driver W x H", f"{width}x{height}", f"{slm.image_shape[1]}x{slm.image_shape[0]}")
             all_ok &= _check("bit depth", depth, comm.SLM_BIT_DEPTH)
             print(f"  {'pixel pitch':<14} device={pitch!s:<10} config={param.pslm * 1e6:g} um")
             print(f"  {'serial number':<14} {serial}")
@@ -78,7 +78,7 @@ def main():
         print(f"\nTemperature: {slm.readTemperature():.2f} C")
 
         if args.write_blank:
-            frame = np.zeros((slm.height, slm.width), dtype=np.uint8)
+            frame = np.zeros(slm.image_shape, dtype=np.uint8)
             t0 = time.perf_counter()
             slm.uploadHologram(frame)
             print(f"Blank frame written in {(time.perf_counter() - t0) * 1e3:.1f} ms")
