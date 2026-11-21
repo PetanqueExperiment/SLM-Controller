@@ -19,9 +19,16 @@ if TYPE_CHECKING:
 
 DYNAMIC_READY_TEXT: str = 'Ready'
 DYNAMIC_EDITING_TEXT: str = 'Editing'
-DEFAULT_TRIGGER_TIMEOUT_MS: int = 1000
 MIN_TRIGGER_TIMEOUT_MS: int = 1
 MAX_TRIGGER_TIMEOUT_MS: int = 60000
+TRIGGER_TIMEOUT_PROFILE_KEY: str = 'trigger_timeout_ms'
+HOLOGRAMS_PROFILE_KEY: str = 'holograms'
+PROFILE_NO_HOLOGRAM: str = 'none'
+
+
+def clampTriggerTimeoutMs(value: float) -> int:
+    """``value`` as a whole number of ms within MIN_TRIGGER_TIMEOUT_MS … MAX_TRIGGER_TIMEOUT_MS."""
+    return min(max(int(round(value)), MIN_TRIGGER_TIMEOUT_MS), MAX_TRIGGER_TIMEOUT_MS)
 
 
 def ordinal(n: int) -> str:
@@ -125,6 +132,29 @@ class DynamicMode(OperationMode):
         slot = self.holograms[index]
         slot.path = path
         slot.data = data
+
+    def profileHolograms(self) -> list[str]:
+        """File of every slot for the profile (PROFILE_NO_HOLOGRAM for an empty slot)."""
+        return [PROFILE_NO_HOLOGRAM if slot.path is None else slot.path for slot in self.holograms]
+
+    def loadProfileHolograms(self, paths: list[Any]) -> list[str]:
+        """Replace the slots by the profile's files (an empty list gives one empty slot).
+
+        A file that is missing or unreadable leaves its slot empty; returns one description per such file.
+        """
+        slots: list[HologramSlot] = []
+        problems: list[str] = []
+        for index, path in enumerate(paths):
+            if not isinstance(path, str) or not path or path == PROFILE_NO_HOLOGRAM:
+                slots.append(HologramSlot())
+                continue
+            try:
+                slots.append(HologramSlot(path, readHologramFile(path)))
+            except Exception as e:
+                problems.append('frame %d: %s (%s)' % (index + 1, path, e))
+                slots.append(HologramSlot())
+        self.holograms = slots or [HologramSlot()]
+        return problems
 
 
 OPERATION_MODES: tuple[type[OperationMode], ...] = (StaticMode, DynamicMode)

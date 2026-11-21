@@ -90,7 +90,7 @@ class DynamicModePage(QtWidgets.QWidget):
         self._number_width = metrics.horizontalAdvance('000')
 
         self.armBtn = QtWidgets.QPushButton('Arm')
-        self.armBtn.setToolTip('Load all frames on the SLM and show frame 1; each trigger then shows the next frame\n(after the last one, frame 1 again). The run ends on Stop or when no trigger comes within the timeout.')
+        self.armBtn.setToolTip('Load all frames on the SLM and show frame 1; each trigger then shows the next frame\n(after the last one, frame 1 again). Before the first trigger the run waits indefinitely;\nafter it, the run ends when no trigger comes within the timeout. Stop ends it at any time.')
         self.stopBtn = QtWidgets.QPushButton('Stop')
         self.stopBtn.setToolTip('End the run after the current trigger wait (at most the timeout)')
         run_buttons = QtWidgets.QHBoxLayout()
@@ -104,11 +104,17 @@ class DynamicModePage(QtWidgets.QWidget):
         buttons.addWidget(self.addSlotBtn)
         buttons.addWidget(self.removeSlotBtn)
         buttons.addWidget(QtWidgets.QLabel('|'))
+        self.triggerCountLabel = QtWidgets.QLabel()
+        self.triggerCountLabel.setToolTip('Triggers received in the current (or last) sequence run')
+        self.setTriggerCount(0)
+        buttons.addWidget(self.triggerCountLabel)
+        buttons.addWidget(QtWidgets.QLabel('|'))
         self.timeoutSpin = QtWidgets.QSpinBox()
         self.timeoutSpin.setRange(MIN_TRIGGER_TIMEOUT_MS, MAX_TRIGGER_TIMEOUT_MS)
         self.timeoutSpin.setSuffix(' ms')
-        self.timeoutSpin.setValue(int(gui.trigger_timeout_ms))
-        self.timeoutSpin.setToolTip('The sequence run ends when no trigger arrives within this time.\nMust be longer than the gap between shots (> 100 ms at 10 Hz).')
+        if gui.trigger_timeout_ms is not None:
+            self.timeoutSpin.setValue(int(gui.trigger_timeout_ms))
+        self.timeoutSpin.setToolTip('After the first trigger, the sequence run ends when no trigger arrives within this time\n(before the first trigger it waits indefinitely). Must be longer than the gap between shots\n(> 100 ms at 10 Hz). Saved in the profile.')
         buttons.addWidget(QtWidgets.QLabel('Timeout:'))
         buttons.addWidget(self.timeoutSpin)
         buttons.addStretch(1)
@@ -145,6 +151,15 @@ class DynamicModePage(QtWidgets.QWidget):
         self._updateRemoveButton()
         self.setSequenceLoaded(False)
 
+    def setTriggerCount(self, count: int) -> None:
+        self.triggerCountLabel.setText('Triggers: %d' % count)
+
+    def setTimeoutValue(self, timeout_ms: int) -> None:
+        """Show ``timeout_ms`` without reporting it back as a user change."""
+        self.timeoutSpin.blockSignals(True)
+        self.timeoutSpin.setValue(int(timeout_ms))
+        self.timeoutSpin.blockSignals(False)
+
     def setSequenceLoaded(self, loaded: bool) -> None:
         """Lock the list while a sequence is running: only Stop is available."""
         self._sequence_loaded = bool(loaded)
@@ -168,6 +183,16 @@ class DynamicModePage(QtWidgets.QWidget):
     def stop_clicked(self) -> None:
         self.stopBtn.setEnabled(False)
         self.gui.stopSequence()
+
+    def reloadSlots(self) -> None:
+        """Rebuild the list after the slots of the mode were replaced (profile)."""
+        while self.blocks:
+            block = self.blocks.pop()
+            self.listLayout.removeWidget(block)
+            block.deleteLater()
+        for index in range(len(self.mode.holograms)):
+            self._addBlock(index)
+        self.setSequenceLoaded(self._sequence_loaded)
 
     def _addBlock(self, index: int) -> None:
         block = HologramSlotBlock(self.mode, index, self._number_width)

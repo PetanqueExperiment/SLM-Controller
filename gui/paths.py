@@ -19,10 +19,13 @@ PARAMETERS_FILE: Path = PARAMETERS_DIR / 'parameters.json'
 
 DEFAULT_PROFILE: str = 'default'
 
-# Default values of the GUI, tracked in the repository: profiles/<name>.json only override them.
-PROFILE_TEMPLATE_DIR: Path = Path(__file__).resolve().parent.parent / 'profile_templates'
+# Default values of the GUI, tracked in the repository (defaults/): profiles/<name>.json only override them, and
+# parameters/parameters.json is created from them.
+DEFAULTS_DIR: Path = Path(__file__).resolve().parent.parent / 'defaults'
+PROFILE_TEMPLATE_DIR: Path = DEFAULTS_DIR / 'profiles'
 PROFILE_TEMPLATE_FILE: Path = PROFILE_TEMPLATE_DIR / 'default.json'
-PARAMETERS_TEMPLATE_FILE: Path = PROFILE_TEMPLATE_DIR / 'parameters.json'
+PARAMETERS_TEMPLATE_FILE: Path = DEFAULTS_DIR / 'parameters' / 'parameters.json'
+SIMULATED_SLM_DEFAULTS_FILE: Path = DEFAULTS_DIR / 'devices' / 'simulated_slm.json'  # also used by a real SLM until it reports its own
 
 STARTUP_LAST_USED: str = 'last_used'
 STARTUP_FIXED: str = 'fixed'

@@ -182,9 +182,9 @@ class LastSentPreviewPanel(QtWidgets.QWidget):
             self.label_slm_temperature.setText("Temp: unavailable")
             self.label_slm_temperature.setToolTip("SLM temperature could not be read")
             return
-        if slm.simulate:
-            self.label_slm_temperature.setText(f"Temp: {temp_c:.1f} °C (sim)")
-            self.label_slm_temperature.setToolTip("SLM temperature of the Simulated SLM (fixed stub value, not logged)")
+        if temp_c is None:
+            self.label_slm_temperature.setText("Temp: — (sim)")
+            self.label_slm_temperature.setToolTip("Simulated SLM: no temperature")
             return
         self.label_slm_temperature.setText(f"Temp: {temp_c:.1f} °C")
         self.label_slm_temperature.setToolTip("SLM temperature, read every second and logged")

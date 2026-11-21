@@ -61,3 +61,22 @@ def test_modes_logic_does_not_load_qt():
     code = "import sys; import gui.panels.modes.logic, gui.panels.modes; print('PyQt5.QtWidgets' in sys.modules)"
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1], check=True)
     assert out.stdout.strip() == 'False'
+
+
+def test_clamp_trigger_timeout():
+    from gui.panels.modes.logic import MAX_TRIGGER_TIMEOUT_MS, MIN_TRIGGER_TIMEOUT_MS, clampTriggerTimeoutMs
+    assert clampTriggerTimeoutMs(250) == 250 and clampTriggerTimeoutMs(250.4) == 250
+    assert clampTriggerTimeoutMs(0) == MIN_TRIGGER_TIMEOUT_MS and clampTriggerTimeoutMs(1e9) == MAX_TRIGGER_TIMEOUT_MS
+
+
+def test_dynamic_holograms_profile_round_trip(tmp_path):
+    good = tmp_path / "frame.npy"
+    np.save(good, np.ones((2, 3)))
+    mode = DynamicMode()
+    assert mode.profileHolograms() == ["none"]
+    problems = mode.loadProfileHolograms([str(good), "none", str(tmp_path / "missing.npy"), 5])
+    assert len(problems) == 1 and "frame 3" in problems[0] and "missing.npy" in problems[0]
+    assert [slot.path for slot in mode.holograms] == [str(good), None, None, None]
+    assert np.array_equal(mode.holograms[0].data["phasePattern"], np.ones((2, 3)))
+    assert mode.profileHolograms() == [str(good), "none", "none", "none"]
+    assert mode.loadProfileHolograms([]) == [] and len(mode.holograms) == 1 and mode.holograms[0].path is None

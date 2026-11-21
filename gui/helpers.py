@@ -83,6 +83,31 @@ def framed_panel(inner_widget: QtWidgets.QWidget) -> QtWidgets.QFrame:
     return frame
 
 
+class MenuHeaderLabel(QtWidgets.QLabel):
+    """Non-clickable text line in a QMenu (via QWidgetAction) drawn on the native menu-item background, so it keeps
+    the menu's gutter line (the style of the menu's first ordinary item is copied)."""
+
+    def __init__(self, menu: QtWidgets.QMenu) -> None:
+        super().__init__()
+        self._menu = menu
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        reference = next((a for a in self._menu.actions() if not a.isSeparator() and not isinstance(a, QtWidgets.QWidgetAction)), None)
+        if reference is None:
+            super().paintEvent(event)
+            return
+        option = QtWidgets.QStyleOptionMenuItem()
+        self._menu.initStyleOption(option, reference)
+        option.text = ""
+        option.rect = self.rect()
+        option.state &= ~QtWidgets.QStyle.State_Selected
+        option.state |= QtWidgets.QStyle.State_Enabled
+        painter = QtGui.QPainter(self)
+        self._menu.style().drawControl(QtWidgets.QStyle.CE_MenuItem, option, painter, self._menu)
+        painter.end()
+        super().paintEvent(event)
+
+
 def register_windows_taskbar_app_id() -> None:
     """Set AppUserModelID so the Windows taskbar uses our icon. Call before QApplication()."""
     if sys.platform == "win32":

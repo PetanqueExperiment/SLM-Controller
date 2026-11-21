@@ -86,6 +86,14 @@ class OperationModePanel(QtWidgets.QWidget):
         self.refreshStatus()
         print('Operation mode:', mode.name)
 
+    def mode(self, mode_cls: type[OperationMode]) -> OperationMode:
+        """The mode object of ``mode_cls`` (whether selected or not)."""
+        return self._modes[mode_cls]
+
+    def modeByName(self, name: str) -> type[OperationMode] | None:
+        """The mode class shown as ``name`` in the selector, or None."""
+        return next((cls for cls in self._mode_classes if cls.name == name), None)
+
     def page(self, mode_cls: type[OperationMode]) -> QtWidgets.QWidget:
         """The page of controls of ``mode_cls``."""
         return self._pages[mode_cls]

@@ -96,6 +96,7 @@ def hw(tmp_path, monkeypatch):
     def make(fake, **kwargs):
         monkeypatch.setattr(MeadowlarkSLM, "_load_blink_dll", staticmethod(lambda path: fake))
         kwargs.setdefault("lut_path", lut_path)
+        kwargs.setdefault("board", 1)
         slm = MeadowlarkSLM(dll_path=dll_path, **kwargs)
         created.append(slm)
         return slm
@@ -107,13 +108,13 @@ def hw(tmp_path, monkeypatch):
 
 
 def test_simulate_round_trip():
-    slm = MeadowlarkSLM(simulate=True, expected_shape=SHAPE)
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=SHAPE)
     slm.connect()
     try:
         frame = np.full((H, W), 7, dtype=np.uint8)
         slm.uploadHologram(frame)
         assert slm.connected and slm.simulate and slm.serial is None
-        assert slm.readTemperature() == slm_module.SIMULATED_TEMPERATURE_C
+        assert slm.readTemperature() is None
         assert np.array_equal(slm.getLastHologram(), frame)
     finally:
         slm.disconnect()
@@ -161,7 +162,7 @@ def test_missing_lut_fails_before_sdk(hw, tmp_path):
 
 
 def test_only_one_connected_instance():
-    a, b = MeadowlarkSLM(simulate=True, expected_shape=SHAPE), MeadowlarkSLM(2, simulate=True, expected_shape=SHAPE)
+    a, b = MeadowlarkSLM(1, simulate=True, expected_shape=SHAPE), MeadowlarkSLM(2, simulate=True, expected_shape=SHAPE)
     a.connect()
     try:
         with pytest.raises(RuntimeError, match="already in use"):
@@ -248,7 +249,7 @@ def test_upload_uses_own_board(hw):
 
 def test_no_hard_coded_lut_or_wfc():
     assert not hasattr(slm_module, "LUT_FILE") and not hasattr(slm_module, "WFC_FILE")
-    assert MeadowlarkSLM(simulate=True, expected_shape=SHAPE).lut_path is None
+    assert MeadowlarkSLM(1, simulate=True, expected_shape=SHAPE).lut_path is None
 
 
 def _write_lut(path, levels=256):
@@ -289,7 +290,7 @@ def test_load_lut_reloads_controller(hw, tmp_path):
 
 def test_load_lut_requires_connection_and_simulate_only_remembers(tmp_path):
     new_lut = _write_lut(tmp_path / "other.LUT")
-    slm = MeadowlarkSLM(simulate=True, expected_shape=SHAPE)
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=SHAPE)
     with pytest.raises(RuntimeError):
         slm.loadLut(new_lut)
     slm.connect()
@@ -340,8 +341,8 @@ def test_missing_or_implausible_size_refuses(hw, kwargs):
 
 def test_simulate_needs_expected_shape():
     with pytest.raises(ValueError, match="expected_shape"):
-        MeadowlarkSLM(simulate=True).connect()
-    slm = MeadowlarkSLM(simulate=True, expected_shape=(600, 800))
+        MeadowlarkSLM(1, simulate=True).connect()
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=(600, 800))
     slm.connect()
     try:
         assert slm.image_shape == (600, 800)
@@ -404,7 +405,7 @@ def test_load_sequence_sends_frames_back_to_back(seq_slm):
     image_size, n, data, args = fake.sequence
     assert (image_size, n) == (24, 3) and slm.sequence_length == 3
     assert np.array_equal(data, np.stack(frames).ravel())
-    assert args == (0, 0, 0, 0, slm_module.TRIGGER_TIMEOUT_MS)
+    assert args == (0, 0, 0, 0, slm_module.WRITE_TIMEOUT_MS)
 
 
 def test_load_sequence_accepts_a_3d_array(seq_slm):
@@ -423,7 +424,7 @@ def test_load_sequence_rejects_bad_frames(seq_slm, frames):
 
 def test_load_sequence_rejects_too_many_frames(seq_slm, monkeypatch):
     slm, fake = seq_slm
-    monkeypatch.setattr(slm_module, "MAX_SEQUENCE_FRAMES", 2)
+    monkeypatch.setattr(slm_module, "MAX_SEQUENCE_FRAMES_1024", 2)
     with pytest.raises(ValueError, match="1 … 2"):
         slm.loadSequence(_seq_frames(3))
     assert fake.sequence is None
@@ -451,8 +452,8 @@ def test_select_frame_passes_trigger_options(seq_slm):
     assert slm.selectFrame(2, timeout_ms=150, output_pulse=True)
     assert slm.selectFrame(0, wait_for_trigger=False, flip_immediate=True)
     assert fake.calls[-4:] == ["Select_image(1, 2)", "ImageWriteComplete(1)", "Select_image(1, 0)", "ImageWriteComplete(1)"]
-    assert fake.write_complete_timeouts[-2:] == [150, slm_module.TRIGGER_TIMEOUT_MS]
-    assert fake.select_args == [(1, 0, 1, 0, 150), (0, 1, 0, 0, slm_module.TRIGGER_TIMEOUT_MS)]
+    assert fake.write_complete_timeouts[-2:] == [150, slm_module.WRITE_TIMEOUT_MS]
+    assert fake.select_args == [(1, 0, 1, 0, 150), (0, 1, 0, 0, slm_module.WRITE_TIMEOUT_MS)]
 
 
 def test_select_frame_reports_failure(seq_slm):
@@ -508,7 +509,7 @@ def test_disconnect_discards_the_sequence(seq_slm):
 
 
 def test_sequence_requires_connection():
-    slm = MeadowlarkSLM(simulate=True, expected_shape=SEQ_SHAPE)
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=SEQ_SHAPE)
     with pytest.raises(RuntimeError, match="not connected"):
         slm.loadSequence(_seq_frames(1))
     with pytest.raises(RuntimeError, match="not connected"):
@@ -516,7 +517,7 @@ def test_sequence_requires_connection():
 
 
 def test_simulated_sequence():
-    slm = MeadowlarkSLM(simulate=True, expected_shape=SEQ_SHAPE)
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=SEQ_SHAPE)
     slm.connect()
     try:
         slm.loadSequence(_seq_frames(3))

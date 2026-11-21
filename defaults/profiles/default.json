@@ -1,9 +1,11 @@
 {
-  "grating": {
-    "x_um": 0,
-    "y_um": 0,
+  "elementary": {
     "phase_levels": 255,
-    "wavelength_nm": 850
+    "wavelength_nm": 850,
+    "grating": {
+      "x_um": 0,
+      "y_um": 0
+    }
   },
   "corrections": {
     "manufacturer": true,
@@ -38,6 +40,9 @@
     "static": {
       "last_hologram": "none"
     },
-    "dynamic": {}
+    "dynamic": {
+      "trigger_timeout_ms": 1000,
+      "holograms": []
+    }
   }
 }

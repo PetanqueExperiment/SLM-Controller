@@ -18,6 +18,7 @@ import numpy as np
 import libslm.slm as comm
 from libslm.slm import MeadowlarkSLM
 from gui.parameters import loadParameters, param
+from gui.settings import SIMULATED_BOARD, deviceImageShape
 
 
 def _query(dll, name, restype, board):
@@ -39,6 +40,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write-blank", action="store_true", help="upload one all-zero frame and wait for completion")
     parser.add_argument("--simulate", action="store_true", help="run against the offline stub instead of hardware")
+    parser.add_argument("--board", type=int, default=1, help="Blink PCIe board number (default: 1)")
     parser.add_argument("--lut", type=Path, default=None, help="LUT file to load at connect (default: none, the controller keeps its LUT)")
     args = parser.parse_args()
 
@@ -47,8 +49,8 @@ def main():
 
     print("DLL:", comm.BLINK_DLL, "(found)" if comm.BLINK_DLL.is_file() else "(MISSING)")
     print("LUT:", "none (use --lut)" if args.lut is None else f"{args.lut} {'(found)' if args.lut.is_file() else '(MISSING)'}")
-    print("Board:", comm.BOARD)
-    slm = MeadowlarkSLM(comm.BOARD, simulate=args.simulate, lut_path=args.lut, expected_shape=(param.ImgResY, param.ImgResX) if args.simulate else None)
+    print("Board:", args.board)
+    slm = MeadowlarkSLM(args.board, simulate=args.simulate, lut_path=args.lut, expected_shape=deviceImageShape(SIMULATED_BOARD) if args.simulate else None)
 
     t0 = time.perf_counter()
     try:
@@ -67,15 +69,17 @@ def main():
             depth = _query(dll, "Get_image_depth", c_int, slm.board)
             pitch = _query(dll, "Get_pixel_pitch", c_double, slm.board)
             serial = _query(dll, "Read_Serial_Number", c_int, slm.board)
-            print("\nDevice vs configuration:")
-            all_ok &= _check("width", width, param.ImgResX)
-            all_ok &= _check("height", height, param.ImgResY)
+            listed_height, listed_width = deviceImageShape(slm.board)
+            print("\nDevice vs configuration (image size: device list, default if not recorded yet):")
+            all_ok &= _check("width", width, listed_width)
+            all_ok &= _check("height", height, listed_height)
             all_ok &= _check("driver W x H", f"{width}x{height}", f"{slm.image_shape[1]}x{slm.image_shape[0]}")
             all_ok &= _check("bit depth", depth, comm.SLM_BIT_DEPTH)
             print(f"  {'pixel pitch':<14} device={pitch!s:<10} config={param.pslm * 1e6:g} um")
             print(f"  {'serial number':<14} {serial}")
 
-        print(f"\nTemperature: {slm.readTemperature():.2f} C")
+        temperature_c = slm.readTemperature()
+        print("\nTemperature:", "not available (simulate)" if temperature_c is None else f"{temperature_c:.2f} C")
 
         if args.write_blank:
             frame = np.zeros(slm.image_shape, dtype=np.uint8)

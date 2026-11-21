@@ -13,7 +13,8 @@ from gui.slm_frame import FrameTerms, composeSlmFrame
 
 
 class SequenceRunThread(QtCore.QThread):
-    """One sequence run. ``armed`` is emitted once frame 0 is shown; ``result`` is set when the thread finishes."""
+    """One sequence run. ``armed`` is emitted once frame 0 is shown; ``trigger_count`` follows the run (read it from
+    the GUI thread); ``result`` is set when the thread finishes."""
 
     armed = QtCore.Signal()
 
@@ -27,6 +28,7 @@ class SequenceRunThread(QtCore.QThread):
         self.flip_immediate = bool(flip_immediate)
         self.frames: list[np.ndarray] = []
         self.result: SequenceRunResult | None = None
+        self.trigger_count = 0
         self._stop = threading.Event()
 
     def requestStop(self) -> None:
@@ -34,6 +36,9 @@ class SequenceRunThread(QtCore.QThread):
 
     def stopRequested(self) -> bool:
         return self._stop.is_set()
+
+    def _setTriggerCount(self, count: int) -> None:
+        self.trigger_count = count
 
     def run(self) -> None:
         try:
@@ -44,6 +49,6 @@ class SequenceRunThread(QtCore.QThread):
                     return
                 frames.append(composeSlmFrame(pattern_rad, self.terms))
             self.frames = frames
-            self.result = playSequence(self.slm, frames, timeout_ms=self.timeout_ms, flip_immediate=self.flip_immediate, stop_requested=self._stop.is_set, on_armed=self.armed.emit)
+            self.result = playSequence(self.slm, frames, timeout_ms=self.timeout_ms, flip_immediate=self.flip_immediate, stop_requested=self._stop.is_set, on_armed=self.armed.emit, on_trigger=self._setTriggerCount, log=print)
         except Exception as e:
             self.result = SequenceRunResult(RUN_ERROR, 0, None, f'{type(e).__name__}: {e}')

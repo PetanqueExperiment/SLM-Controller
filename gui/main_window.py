@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import filecmp
+import math
 import os
 import shutil
 import sys
@@ -18,8 +19,8 @@ import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError, checkLutFile, loadCorrectionPattern
 from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, STARTUP_FIXED, STARTUP_MODES
-from gui.settings import PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceLabel, factoryLutPath, lutPath, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
-from gui.helpers import framed_panel
+from gui.settings import MAX_SLM_PIXEL_PITCH_UM, MIN_SLM_PIXEL_PITCH_UM, PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceImageShape, deviceLabel, devicePixelPitchUm, deviceSlmRadiusM, defaultDeviceName, setDeviceName, parsePixelPitchUm, setDeviceImageSize, setDevicePixelPitchUm, setDeviceSlmRadiusM, MAX_SLM_RADIUS_M, factoryLutPath, lutPath, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
+from gui.helpers import MenuHeaderLabel, framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
 from gui.panels.advanced import AdvancedControlPanel
@@ -28,7 +29,7 @@ from gui.panels.arbitrary_arrays import ArbitraryArraysPanel
 from gui.panels.preview import LastSentPreviewPanel
 from gui.panels.modes import DEFAULT_OPERATION_MODE, OPERATION_MODES, DynamicMode, StaticMode
 from gui.panels.modes.common import OperationModePanel
-from gui.panels.modes.logic import DEFAULT_TRIGGER_TIMEOUT_MS
+from gui.panels.modes.logic import HOLOGRAMS_PROFILE_KEY, TRIGGER_TIMEOUT_PROFILE_KEY, clampTriggerTimeoutMs
 from gui.panels.output import OutputDock
 from gui.sequence_run import RUN_ERROR, RUN_NO_TRIGGER
 from gui.sequence_thread import SequenceRunThread
@@ -36,7 +37,9 @@ from gui.slm_frame import FrameTerms, composeSlmFrame
 from gui.panels.slm_info import SlmInfoDock
 from gui.zernike import __zernikepolar__, __zernikepolynomials__
 
-from gui.parameters import ParametersError, loadParameters, param
+from gui.parameters import ParametersError, loadParameters, param, setImageSize, setPixelPitchUm, setSlmRadiusM
+from gui.parameters_dialog import ParametersDialog
+from gui.device_dialog import DeviceParametersDialog
 
 if TYPE_CHECKING:
     from gui.hero import SLMHero
@@ -90,7 +93,7 @@ class SLMGUI(QtWidgets.QMainWindow):
     # --- Construction / device ---
     parent: Any  # optional owner passed to __init__ (only set if given)
     SLM: Optional[MeadowlarkSLM]  # None when no SLM is connected
-    factory_lut: Optional[np.ndarray]  # factory correction of the connected SLM [rad] (devices.json factory_lut); None = none
+    factory_lut: Optional[np.ndarray]  # factory correction of the connected SLM [rad] (devices.json wfc); None = none
     board: Optional[int]  # Blink PCIe board number of the SLM (None = no SLM chosen); stored in the profile
     SLM_shape: tuple[int, int]  # (Ny, Nx)
     param_P: float  # gray levels per 2π (profile: grating.phase_levels)
@@ -179,9 +182,9 @@ class SLMGUI(QtWidgets.QMainWindow):
     _startup_mode_group: QtWidgets.QActionGroup
     _connect_action: QtWidgets.QAction  # Device ▸ Connect… (enabled only while no SLM is connected)
     _disconnect_action: QtWidgets.QAction  # Device ▸ Disconnect (enabled only while an SLM is connected)
-    _set_factory_lut_action: QtWidgets.QAction  # Device ▸ Set WFC… (enabled only for a real, selected SLM)
-    _set_lut_action: QtWidgets.QAction
+    _set_device_params_action: QtWidgets.QAction  # Device ▸ Set device parameters… (enabled only for a real, selected SLM)
     _device_info_action: QtWidgets.QAction
+    _device_board_label: QtWidgets.QLabel  # Device menu: the SLM the actions below apply to (not clickable)
 
     # --- Settings / profiles ---
     settings: AppSettings  # settings/settings.json
@@ -189,9 +192,10 @@ class SLMGUI(QtWidgets.QMainWindow):
     _suspend_phase_updates: bool  # True while a profile is applied: updatePhase() waits until all values are set
 
     # --- Dynamic mode ---
-    trigger_timeout_ms: int  # sequence run ends when no trigger arrives within this time (Dynamic mode, Timeout)
+    trigger_timeout_ms: Optional[int]  # after the 1st trigger, the run ends when none arrives within this time (profile: operation_mode.dynamic); None until a profile is applied
     flip_immediate: bool  # Select_image flip_immediate: flip right at the trigger instead of after the 0–0.696 ms sync
     _sequence_thread: Optional[SequenceRunThread]  # running sequence (Arm … end of run); None otherwise
+    _trigger_count_timer: QtCore.QTimer  # shows the trigger count of the running sequence
 
     # --- Aliases of panel widgets ---
     _ManufacturerCorrectionChkBx: QtWidgets.QCheckBox
@@ -255,15 +259,19 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self.settings = AppSettings.load()
         self.current_profile = self.settings.startupProfile()
+        self._setStartupGeometry()
         self.board = None
         self.SLM = None
         self.factory_lut = None
         self._suspend_phase_updates = False
         self._dynamic_is_ready = False
         self._sequence_is_loaded = False
-        self.trigger_timeout_ms = DEFAULT_TRIGGER_TIMEOUT_MS
+        self.trigger_timeout_ms = None
         self.flip_immediate = False
         self._sequence_thread = None
+        self._trigger_count_timer = QtCore.QTimer(self)
+        self._trigger_count_timer.setInterval(100)
+        self._trigger_count_timer.timeout.connect(self._showTriggerCount)
         self._profile_operation_mode: dict[str, Any] = {}
 
         self.initUI()
@@ -381,34 +389,153 @@ class SLMGUI(QtWidgets.QMainWindow):
             print(text)
             QtWidgets.QMessageBox.warning(self, "Parameters", text)
 
+    def _setStartupGeometry(self) -> None:
+        """Image size, pixel pitch and SLM radius to build the GUI with: those stored for the startup profile's SLM (defaults if not known yet)."""
+        try:
+            board = parseBoard(loadProfileParams(self.current_profile)[0].get("board"))
+        except ProfileTemplateError:
+            board = None
+        height, width = deviceImageShape(board)
+        pitch_um = devicePixelPitchUm(board)
+        radius_m = deviceSlmRadiusM(board)
+        setImageSize(width, height)
+        setPixelPitchUm(pitch_um)
+        setSlmRadiusM(radius_m)
+        print(f"SLM image size {width} x {height} px, pixel pitch {pitch_um:g} µm, SLM radius {radius_m * 1e3:g} mm ({'no SLM in the profile' if board is None else self._boardLabel(board)}; size and pitch updated from the SLM at connect)")
+
+    @staticmethod
+    def _currentPixelPitchUm() -> float:
+        return param.pslm * 1e6
+
+    def _geometryDiffers(self, shape: tuple[int, int], pitch_um: float, radius_m: float) -> bool:
+        return shape != (param.ImgResY, param.ImgResX) or not math.isclose(pitch_um, self._currentPixelPitchUm(), rel_tol=1e-9) or not math.isclose(radius_m, param.max_radius, rel_tol=1e-9)
+
+    def _rebuildForGeometry(self, shape: tuple[int, int], pitch_um: float, radius_m: float) -> None:
+        """Rebuild everything that depends on the SLM image size, pixel pitch or SLM radius for ``shape`` = (height,
+        width), ``pitch_um`` [µm] and ``radius_m`` [m], keeping the settings.
+
+        Grids, grating, Fresnel, Zernike and pupil are recomputed from the current settings (as a profile). A hologram
+        of another size cannot be shown: the display is blank until one of the new size is loaded or computed.
+        """
+        old_shape, old_pitch_um, old_radius_m = (param.ImgResY, param.ImgResX), self._currentPixelPitchUm(), param.max_radius
+        params = self.profileParams()
+        setImageSize(shape[1], shape[0])
+        setPixelPitchUm(pitch_um)
+        setSlmRadiusM(radius_m)
+        if shape != old_shape:
+            self.factory_lut = None
+        self.initPhase()
+        self._arbitrary._clearComputedHologram()
+        self.applyProfile(params)
+        text = f"The SLM is {shape[1]} x {shape[0]} px with a {pitch_um:g} µm pixel pitch and a {radius_m * 1e3:g} mm SLM radius; the GUI was set up for {old_shape[1]} x {old_shape[0]} px, {old_pitch_um:g} µm, {old_radius_m * 1e3:g} mm and has been rebuilt for the new values."
+        if not math.isclose(radius_m, old_radius_m, rel_tol=1e-9):
+            text += "\n\nThe Zernike coefficients are kept as numbers: they now refer to the new SLM radius (waves RMS over that disk)."
+        if np.shape(self.phasePattern) != self.SLM_shape:
+            self.phasePattern = np.zeros(self.SLM_shape)
+            self._arbitrary.refreshHologramLabel()
+            text += f"\n\nThe displayed hologram was for the old size: the SLM shows a blank pattern until you load or compute one for {shape[1]} x {shape[0]} px."
+        elif not math.isclose(pitch_um, old_pitch_um, rel_tol=1e-9) and np.any(self.phasePattern):
+            text += f"\n\nThe displayed trap hologram was computed for a {old_pitch_um:g} µm pitch: its traps land at {pitch_um / old_pitch_um:.3f}× the intended distances. Run the algorithm (or reload the hologram) to recompute it."
+        print(text.replace("\n\n", " ").replace("\n", " "))
+        QtWidgets.QMessageBox.information(self, "SLM geometry", text)
+
+    def _connectFailed(self, name: str, e: Exception) -> None:
+        print(f"Could not connect to {name}: {e}")
+        QtWidgets.QMessageBox.warning(self, "SLM not connected", f"Could not connect to {name}:\n{e}\n\nThe GUI runs without an SLM.")
+
+    def _openSimulatedSlm(self, name: str) -> Optional[tuple[MeadowlarkSLM, float]]:
+        """Connect the Simulated SLM with its size and pitch (devices.json simulated_slm, else defaults/devices/simulated_slm.json)."""
+        try:
+            slm = MeadowlarkSLM(SIMULATED_BOARD, simulate=True, expected_shape=deviceImageShape(SIMULATED_BOARD))
+            slm.connect()
+        except Exception as e:
+            self._connectFailed(name, e)
+            return None
+        return slm, devicePixelPitchUm(SIMULATED_BOARD)
+
+    def _openRealSlm(self, board: int, device: Optional[Device], name: str) -> Optional[tuple[MeadowlarkSLM, float]]:
+        """Connect the real SLM on ``board``: LUT and serial check, then size and pixel pitch read from the SLM and
+        recorded in the device list. None if not connected (nothing was sent to the SLM)."""
+        lut_ok, lut_path = self._deviceLutPath(board, device)
+        if not lut_ok:
+            return None
+        expected = None if device is None else device.serial
+        try:
+            slm = MeadowlarkSLM(board, lut_path=lut_path, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act))
+            slm.connect()
+        except SerialMismatchError as e:
+            print(f"Connection aborted: {e} Nothing was sent to the SLM.")
+            return None
+        except Exception as e:
+            self._connectFailed(name, e)
+            return None
+        pitch_um = self._reportedPixelPitchUm(slm, board, device, name)
+        if pitch_um is None:
+            slm.disconnect()
+            return None
+        shape = tuple(slm.image_shape)
+        if device is None or device.width_px is None or device.imageShape() != shape:
+            if setDeviceImageSize(board, shape[1], shape[0]):
+                print(f"{name}: image size {shape[1]} x {shape[0]} px recorded in the device list")
+        if device is None or device.pixel_pitch_um is None or not math.isclose(device.pixel_pitch_um, pitch_um, rel_tol=1e-9):
+            if setDevicePixelPitchUm(board, pitch_um):
+                print(f"{name}: pixel pitch {pitch_um:g} µm recorded in the device list")
+        if device is not None and device.name is None and slm.serial is not None:
+            if setDeviceName(board, defaultDeviceName(slm.serial)):
+                print(f"{name}: named {defaultDeviceName(slm.serial)!r} in the device list (Device ▸ Set device parameters… to rename)")
+        return slm, pitch_um
+
+    def _reportedPixelPitchUm(self, slm: MeadowlarkSLM, board: int, device: Optional[Device], name: str) -> Optional[float]:
+        """Pixel pitch [µm] reported by the just-connected real SLM (stored / default value if not reported); None if implausible."""
+        try:
+            reported = slm.readPixelPitchUm()
+        except Exception as e:
+            reported, error = None, e
+        else:
+            error = None
+        if reported is None:
+            fallback = devicePixelPitchUm(board)
+            print(f"{name}: the SLM does not report its pixel pitch{'' if error is None else f' ({error})'}; using {fallback:g} µm ({'device list' if device is not None and device.pixel_pitch_um is not None else 'default'})")
+            return fallback
+        if parsePixelPitchUm(reported) is None:
+            text = f"{name} reports a pixel pitch of {reported!r}, outside the plausible range {MIN_SLM_PIXEL_PITCH_UM:g} … {MAX_SLM_PIXEL_PITCH_UM:g} µm.\n\nNot connected (nothing was sent to the SLM)."
+            print(text.replace("\n\n", " ").replace("\n", " "))
+            QtWidgets.QMessageBox.warning(self, "SLM not connected", text)
+            return None
+        return float(reported)
+
     def connectSLM(self, board: int) -> bool:
-        """Connect to the SLM on ``board`` and upload the current hologram. On failure the GUI keeps running without an SLM."""
+        """Connect to the SLM on ``board`` and upload the current hologram. On failure the GUI keeps running without an SLM.
+
+        The Simulated SLM and a real SLM are opened differently (_openSimulatedSlm / _openRealSlm); afterwards both
+        go the same way: rebuild if the geometry differs, then WFC and the first frame.
+        """
         if self.SLM is not None:
             print(f"Already connected: {self._boardLabel(self.board)}")
             return False
         name = self._boardLabel(board)
         device = findDevice(board)
-        expected = None if device is None else device.serial
-        lut_ok, lut_path = self._deviceLutPath(board, device)
-        if not lut_ok:
+        if board == SIMULATED_BOARD:
+            opened = self._openSimulatedSlm(name)
+        else:
+            opened = self._openRealSlm(board, device, name)
+        if opened is None:
             return False
-        try:
-            slm = MeadowlarkSLM(board, simulate=board == SIMULATED_BOARD, lut_path=lut_path, expected_serial=expected, on_serial_mismatch=lambda exp, act: self._confirmSerialOverwrite(board, exp, act), expected_shape=(param.ImgResY, param.ImgResX))
-            slm.connect()
-        except SerialMismatchError as e:
-            print(f"Connection aborted: {e} Nothing was sent to the SLM.")
-            return False
-        except Exception as e:
-            print(f"Could not connect to {name}: {e}")
-            QtWidgets.QMessageBox.warning(self, "SLM not connected", f"Could not connect to {name}:\n{e}\n\nThe GUI runs without an SLM.")
-            return False
+        slm, pitch_um = opened
+        shape = tuple(slm.image_shape)
+        radius_m = deviceSlmRadiusM(board)
+        if device is not None and device.slm_radius_m is None:
+            if setDeviceSlmRadiusM(board, radius_m):
+                print(f"{name}: SLM radius {radius_m * 1e3:g} mm (default) recorded in the device list; change it with Device ▸ Set device parameters…")
+        if self._geometryDiffers(shape, pitch_um, radius_m):
+            self._rebuildForGeometry(shape, pitch_um, radius_m)
         self.SLM = slm
         self.board = board
         self._updateWindowTitle()
-        print(f"Connected to {name}" + ("" if board == SIMULATED_BOARD else f" (LUT: {lut_path or 'none loaded'})"))
+        print(f"Connected to {name}" + ("" if slm.simulate else f" (LUT: {slm.lut_path or 'none loaded'})"))
         self._checkSerial(device, slm.serial)
-        if board != SIMULATED_BOARD and lut_path is None:
-            text = f"{name}: no LUT is set, so none was loaded.\nThe controller keeps the LUT it already has.\n\nSet it with Device ▸ Set LUT…"
+        if not slm.simulate and slm.lut_path is None:
+            text = f"{name}: no LUT is set, so none was loaded.\nThe controller keeps the LUT it already has.\n\nSet it with Device ▸ Set device parameters…"
             print(text.replace("\n\n", " ").replace("\n", " "))
             QtWidgets.QMessageBox.warning(self, "No LUT", text)
         self._loadFactoryLut(device)
@@ -429,13 +556,13 @@ class SLMGUI(QtWidgets.QMainWindow):
         if path.is_file():
             return True, path
         label = self._boardLabel(board)
-        text = f"{label}: LUT {name!r} is set but its file is missing:\n{path}\n\nNot connected. Put the file back, or choose another LUT with Device ▸ Set LUT…"
+        text = f"{label}: LUT {name!r} is set but its file is missing:\n{path}\n\nNot connected. Put the file back, or choose another LUT with Device ▸ Set device parameters…"
         print(text.replace("\n\n", " ").replace("\n", " "))
         QtWidgets.QMessageBox.warning(self, "SLM not connected", text)
         return False, None
 
     def _loadFactoryLut(self, device: Optional[Device]) -> None:
-        """Load the connected SLM's factory correction (devices.json factory_lut → devices/<name>.bmp) into self.factory_lut.
+        """Load the connected SLM's factory correction (devices.json wfc → devices/<name>.bmp) into self.factory_lut.
 
         The Simulated SLM gets none. A real SLM without a usable file gets none either, with a warning.
         """
@@ -456,7 +583,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             except (OSError, ValueError) as e:
                 reason = f"WFC {name!r} could not be loaded ({e})"
         print(f"{label}: {reason}; frames are sent without manufacturer correction")
-        QtWidgets.QMessageBox.warning(self, "No WFC", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set WFC…")
+        QtWidgets.QMessageBox.warning(self, "No WFC", f"{label}: {reason}.\n\nFrames are sent without manufacturer correction.\nSet it with Device ▸ Set device parameters…")
 
     def _confirmSerialOverwrite(self, board: int, expected: int, actual: int) -> bool:
         """Serial number mismatch while connecting (before anything is sent to the SLM). Yes: overwrite it in devices.json and connect; No: abort."""
@@ -503,7 +630,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         available = self.factory_lut is not None
         box.setEnabled(available)
-        box.setToolTip("" if available else "No WFC loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set WFC…)")
+        box.setToolTip("" if available else "No WFC loaded: Simulated SLM, no SLM connected, or none set (Device ▸ Set device parameters…)")
 
     @property
     def dynamicIsReady(self) -> bool:
@@ -572,6 +699,8 @@ class SLMGUI(QtWidgets.QMainWindow):
         thread.finished.connect(lambda: self._finishSequenceRun(thread))
         self._sequence_thread = thread
         self.sequenceIsLoaded = True
+        self._dynamicPage().setTriggerCount(0)
+        self._trigger_count_timer.start()
         print(f"Arm: composing and loading {len(patterns_rad)} frames (trigger timeout {self.trigger_timeout_ms} ms, flip immediate {self.flip_immediate})")
         thread.start()
         return True
@@ -595,13 +724,33 @@ class SLMGUI(QtWidgets.QMainWindow):
         if thread.frames:
             self.totalPhase = thread.frames[0]
             self._preview._update_last_sent_preview()
-        print(f"Armed: {len(thread.frames)} frames on the SLM, frame 1 displayed; waiting for triggers")
+        print(f"Armed: {len(thread.frames)} frames on the SLM, frame 1 displayed; waiting for the first trigger (no time limit)")
+
+    def _dynamicPage(self):
+        return self._operation_mode_panel.page(DynamicMode)
+
+    def _showTriggerCount(self) -> None:
+        thread = self._sequence_thread
+        if thread is not None:
+            self._dynamicPage().setTriggerCount(thread.trigger_count)
+
+    def setTriggerTimeoutMs(self, timeout_ms: float) -> None:
+        """Set the trigger timeout of the dynamic mode (clamped to the allowed range) and show it on the Dynamic page."""
+        value = clampTriggerTimeoutMs(timeout_ms)
+        if value != timeout_ms:
+            print(f"Trigger timeout {timeout_ms!r} ms is outside the allowed range: using {value} ms")
+        self.trigger_timeout_ms = value
+        panel = getattr(self, "_operation_mode_panel", None)
+        if panel is not None:
+            self._dynamicPage().setTimeoutValue(value)
 
     def _finishSequenceRun(self, thread: SequenceRunThread) -> None:
         if thread is not self._sequence_thread:
             return
         self._sequence_thread = None
+        self._trigger_count_timer.stop()
         result = thread.result
+        self._dynamicPage().setTriggerCount(thread.trigger_count if result is None else result.triggers)
         if result is not None and result.last_frame is not None and result.last_frame < len(thread.frames):
             self.totalPhase = thread.frames[result.last_frame]
             self.phasePattern = thread.patterns_rad[result.last_frame]
@@ -774,28 +923,53 @@ class SLMGUI(QtWidgets.QMainWindow):
         menu.addAction("View devices").triggered.connect(lambda _checked=False: self._showDevices())
         menu.addAction("Add device").triggered.connect(lambda _checked=False: self._addDeviceDialog())
         menu.addSeparator()
+        self._device_board_label = MenuHeaderLabel(menu)
+        self._device_board_label.setContentsMargins(32, 3, 12, 4)
+        font = self._device_board_label.font()
+        font.setBold(True)
+        self._device_board_label.setFont(font)
+        board_header = QtWidgets.QWidgetAction(menu)
+        board_header.setDefaultWidget(self._device_board_label)
+        board_header.setEnabled(False)
+        menu.addAction(board_header)
         self._connect_action = menu.addAction("Connect…")
         self._connect_action.triggered.connect(lambda _checked=False: self._connectDialog())
-        self._set_factory_lut_action = menu.addAction("Set WFC…")
-        self._set_factory_lut_action.triggered.connect(lambda _checked=False: self._setFactoryLutDialog())
-        self._set_lut_action = menu.addAction("Set LUT…")
-        self._set_lut_action.triggered.connect(lambda _checked=False: self._setLutDialog())
-        self._device_info_action = menu.addAction("Device info…")
-        self._device_info_action.triggered.connect(lambda _checked=False: self._showDeviceInfo())
         self._disconnect_action = menu.addAction("Disconnect")
         self._disconnect_action.triggered.connect(lambda _checked=False: self._disconnectClicked())
+        self._set_device_params_action = menu.addAction("Set device parameters…")
+        self._set_device_params_action.triggered.connect(lambda _checked=False: self._setDeviceParametersDialog())
+        self._device_info_action = menu.addAction("Device info…")
+        self._device_info_action.triggered.connect(lambda _checked=False: self._showDeviceInfo())
+        menu.addSeparator()
+        menu.addAction("Set Simulated SLM parameters…").triggered.connect(lambda _checked=False: self._setSimulatedSizeDialog())
         menu.aboutToShow.connect(self._updateDeviceActions)
         return menu
 
+    def _deviceMenuBoardText(self) -> str:
+        """Header of the Device menu section: which SLM Disconnect / Set WFC / Set LUT / … apply to."""
+        if self.board is None:
+            return "No SLM selected"
+        return f"{self._boardLabel(self.board)} ({'connected' if self.SLM is not None else 'not connected'})"
+
     def _updateDeviceActions(self) -> None:
+        self._device_board_label.setText(self._deviceMenuBoardText())
         self._connect_action.setEnabled(self.SLM is None)
         self._disconnect_action.setEnabled(self.SLM is not None)
         self._device_info_action.setEnabled(self.SLM is not None)
-        self._set_factory_lut_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
-        self._set_lut_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
+        self._set_device_params_action.setEnabled(self.board is not None and self.board != SIMULATED_BOARD)
+
+    def _setDeviceParametersDialog(self) -> None:
+        """Device ▸ Set device parameters…: the device list entry of the selected (real) SLM."""
+        board = self.board
+        if board is None or board == SIMULATED_BOARD:
+            return
+        if findDevice(board) is None:
+            QtWidgets.QMessageBox.warning(self, "Device parameters", f"{self._boardLabel(board)} is not in the device list.\nAdd it first with Device ▸ Add device.")
+            return
+        DeviceParametersDialog(self, board).exec_()
 
     def _setFactoryLutDialog(self) -> None:
-        """Device ▸ Set WFC…: pick the factory correction .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
+        """Device ▸ Set device parameters… ▸ WFC Load…: pick the factory correction .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
         board = self.board
         if board is None or board == SIMULATED_BOARD:
             return
@@ -835,7 +1009,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             print(f"{label}: new WFC applied")
 
     def _setLutDialog(self) -> None:
-        """Device ▸ Set LUT…: pick a .LUT for the selected (real) SLM, copy it to devices/ and store its name.
+        """Device ▸ Set device parameters… ▸ LUT Load…: pick a .LUT for the selected (real) SLM, copy it to devices/ and store its name.
 
         If that SLM is connected, the LUT is loaded into its controller right away and the current frame is resent.
         """
@@ -923,7 +1097,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             return None
         lines = [self._boardLabel(self.board)]
         if slm.simulate:
-            lines += ["No hardware (simulate mode).", f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px (from parameters.json)", "LUT: none", "WFC: none"]
+            lines += ["No hardware (simulate mode).", f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px, pixel pitch {self._currentPixelPitchUm():g} µm, Zernike correction radius {param.max_radius * 1e3:g} mm", "LUT: none", "WFC: none"]
             return "\n".join(lines)
         device = findDevice(self.board)
         listed = None if device is None else device.serial
@@ -932,8 +1106,10 @@ class SLMGUI(QtWidgets.QMainWindow):
             serial += f" (device list: {listed})"
         lines.append(f"Serial number: {serial}")
         lines.append(f"Image: {slm.image_shape[1]} x {slm.image_shape[0]} px, {slm.bit_depth} bit")
+        lines.append(f"Zernike correction radius: {param.max_radius * 1e3:g} mm")
         if self.sequenceIsRunning():
-            lines.append("Pixel pitch, temperature: not read while a frame sequence is running")
+            lines.append(f"Pixel pitch: {param.pslm * 1e6:g} µm")
+            lines.append("Temperature: not read while a frame sequence is running")
         else:
             lines += self._readDeviceInfoLines(slm)
         lines.append(f"LUT: {'none loaded' if slm.lut_path is None else Path(slm.lut_path).stem}")
@@ -944,14 +1120,16 @@ class SLMGUI(QtWidgets.QMainWindow):
     @staticmethod
     def _readDeviceInfoLines(slm: MeadowlarkSLM) -> list[str]:
         lines = []
+        used_um = param.pslm * 1e6
         try:
-            pitch_um = slm.readPixelPitchUm()
-            pitch = "not reported" if pitch_um is None else f"{pitch_um:g} µm"
+            reported_um = slm.readPixelPitchUm()
+            note = "" if reported_um is not None and math.isclose(reported_um, used_um, rel_tol=1e-9) else " (not reported by the SLM)" if reported_um is None else f" (the SLM now reports {reported_um:g} µm)"
         except Exception as e:
-            pitch = f"could not be read ({e})"
-        lines.append(f"Pixel pitch: {pitch} (parameters.json: {param.pslm * 1e6:g} µm)")
+            note = f" (could not be read from the SLM: {e})"
+        lines.append(f"Pixel pitch: {used_um:g} µm{note}")
         try:
-            temperature = f"{slm.readTemperature():.1f} °C"
+            temperature_c = slm.readTemperature()
+            temperature = "not available" if temperature_c is None else f"{temperature_c:.1f} °C"
         except Exception as e:
             temperature = f"could not be read ({e})"
         lines.append(f"Temperature: {temperature}")
@@ -964,6 +1142,72 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         print("Device info: " + text.replace("\n", " | "))
         QtWidgets.QMessageBox.information(self, "Device info", text)
+
+    def _setSimulatedSizeDialog(self) -> None:
+        """Device ▸ Set Simulated SLM parameters…: image size, pixel pitch and Zernike correction radius of the Simulated SLM."""
+        if self.sequenceIsRunning():
+            QtWidgets.QMessageBox.warning(self, "Simulated SLM", "A frame sequence is running.\nStop it first (Dynamic mode ▸ Stop).")
+            return
+        height, width = deviceImageShape(SIMULATED_BOARD)
+        pitch_um = devicePixelPitchUm(SIMULATED_BOARD)
+        radius_m = deviceSlmRadiusM(SIMULATED_BOARD)
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Simulated SLM parameters")
+        width_spin, height_spin = QtWidgets.QSpinBox(), QtWidgets.QSpinBox()
+        for spin, value in ((width_spin, width), (height_spin, height)):
+            spin.setRange(1, 16384)
+            spin.setSuffix(" px")
+            spin.setValue(value)
+        pitch_spin = QtWidgets.QDoubleSpinBox()
+        pitch_spin.setRange(MIN_SLM_PIXEL_PITCH_UM, MAX_SLM_PIXEL_PITCH_UM)
+        pitch_spin.setDecimals(3)
+        pitch_spin.setSuffix(" µm")
+        pitch_spin.setValue(pitch_um)
+        radius_spin = QtWidgets.QDoubleSpinBox()
+        radius_spin.setRange(0.001, MAX_SLM_RADIUS_M * 1e3)
+        radius_spin.setDecimals(4)
+        radius_spin.setSuffix(" mm")
+        radius_spin.setValue(radius_m * 1e3)
+        form = QtWidgets.QFormLayout(dialog)
+        form.addRow("Width", width_spin)
+        form.addRow("Height", height_spin)
+        form.addRow("Pixel pitch", pitch_spin)
+        form.addRow("Zernike correction radius", radius_spin)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        new_width, new_height = width_spin.value(), height_spin.value()
+        new_pitch_um = pitch_spin.value() if not math.isclose(pitch_spin.value(), round(pitch_um, 3), abs_tol=1e-9) else pitch_um
+        new_radius_m = radius_spin.value() / 1e3 if not math.isclose(radius_spin.value(), round(radius_m * 1e3, 4), abs_tol=1e-9) else radius_m
+        try:
+            setDeviceImageSize(SIMULATED_BOARD, new_width, new_height)
+            setDevicePixelPitchUm(SIMULATED_BOARD, new_pitch_um)
+            setDeviceSlmRadiusM(SIMULATED_BOARD, new_radius_m)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, "Simulated SLM parameters", f"Could not save:\n{e}")
+            return
+        print(f"Simulated SLM set to {new_width} x {new_height} px, pixel pitch {new_pitch_um:g} µm, Zernike correction radius {new_radius_m * 1e3:g} mm")
+        if self.SLM is not None and self.board == SIMULATED_BOARD and self._geometryDiffers((new_height, new_width), new_pitch_um, new_radius_m):
+            self.disconnectSLM()
+            self.connectSLM(SIMULATED_BOARD)
+
+    def _applySlmRadiusM(self, board: int, radius_m: float) -> bool:
+        """Store the Zernike correction radius [m] of ``board``; rebuild if that SLM is connected. False if refused or failed."""
+        if self.sequenceIsRunning():
+            QtWidgets.QMessageBox.warning(self, "Zernike correction radius", "A frame sequence is running.\nStop it first (Dynamic mode ▸ Stop).")
+            return False
+        try:
+            setDeviceSlmRadiusM(board, radius_m)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, "Zernike correction radius", f"Could not save the Zernike correction radius:\n{e}")
+            return False
+        print(f"{self._boardLabel(board)}: Zernike correction radius set to {radius_m * 1e3:g} mm")
+        if self.SLM is not None and self.board == board and not math.isclose(radius_m, param.max_radius, rel_tol=1e-9):
+            self._rebuildForGeometry((param.ImgResY, param.ImgResX), self._currentPixelPitchUm(), radius_m)
+        return True
 
     def _showDevices(self) -> None:
         devices = loadDevices()
@@ -1006,7 +1250,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             self.connectSLM(board)
 
     def _create_settings_menu(self) -> QtWidgets.QMenu:
-        """Settings drop-down: which profile is loaded when the app starts (stored in settings.json)."""
+        """Settings drop-down: which profile is loaded when the app starts (stored in settings.json), and Parameters…."""
         menu = QtWidgets.QMenu(self)
         startup_menu = menu.addMenu("Startup profile")
         self._startup_mode_group = QtWidgets.QActionGroup(self)
@@ -1023,7 +1267,12 @@ class SLMGUI(QtWidgets.QMainWindow):
         self._startup_mode_group.triggered.connect(self._on_startup_mode_selected)
         startup_menu.addSeparator()
         startup_menu.addAction("Set profile…").triggered.connect(lambda _checked=False: self._setStartupProfileDialog())
+        menu.addAction("Parameters…").triggered.connect(lambda _checked=False: self._showParametersDialog())
         return menu
+
+    def _showParametersDialog(self) -> None:
+        """Settings ▸ Parameters…: edit parameters/parameters.json (used from the next start)."""
+        ParametersDialog(self).exec_()
 
     def _updateStartupProfileLabel(self) -> None:
         self._startup_mode_actions[STARTUP_FIXED].setText(f"Profile: {self.settings.startup_profile}")
@@ -1068,9 +1317,9 @@ class SLMGUI(QtWidgets.QMainWindow):
         return str(int(value)) if value.is_integer() else repr(value)
 
     def profileParams(self) -> dict[str, Any]:
-        """Current values of everything stored in a profile (same layout as profile_templates/default.json)."""
+        """Current values of everything stored in a profile (same layout as defaults/profiles/default.json)."""
         params: dict[str, Any] = {} if self.board is None else {"board": self.board}
-        params["grating"] = {"x_um": float(self.dx), "y_um": float(self.dy), "phase_levels": self.param_P, "wavelength_nm": round(self.wavelength_m * 1e9, 6)}
+        params["elementary"] = {"phase_levels": self.param_P, "wavelength_nm": round(self.wavelength_m * 1e9, 6), "grating": {"x_um": float(self.dx), "y_um": float(self.dy)}}
         params["corrections"] = {"manufacturer": self._ManufacturerCorrectionChkBx.isChecked(), "aberration": self._zernikeCorrectionChkBx.isChecked()}
         pupil: dict[str, Any] = {"enabled": self._pupilChkBx.isChecked(), "radius_mm": self.pupilEdt.text().strip()}
         for key, edit in (("x0_mm", self.pupilCenterEdt_x0), ("y0_mm", self.pupilCenterEdt_y0), ("move_out_um", self.pupilOutLineEdit)):
@@ -1084,32 +1333,65 @@ class SLMGUI(QtWidgets.QMainWindow):
         return params
 
     def _profileOperationModeParams(self) -> dict[str, Any]:
-        """Profile section of the operation mode: the mode, the Static last hologram file, and the Dynamic section.
+        """Profile section of the operation mode: the selected mode, the Static last hologram file and the Dynamic
+        settings (trigger timeout, hologram files of the frames; "none" for an empty frame).
 
-        Only the Static mode is saved (Dynamic is in development): in Dynamic mode the section last loaded or saved
-        is written back unchanged, and the "dynamic" section is always kept as it is. A displayed hologram that exists
-        only in memory is not remembered ("none").
+        The Static hologram is taken from the display only while Static is selected (in Dynamic mode the display
+        follows the sequence), otherwise the one last loaded or saved is kept. A hologram that exists only in memory
+        is not remembered ("none").
         """
         section = copy.deepcopy(self._profile_operation_mode)
-        if not isinstance(self.operation_mode, StaticMode):
-            print("Profile: Dynamic mode is in development and is not saved; the operation mode section is kept as loaded")
-            return section
-        hologram_file = self._arbitrary.displayedHologramFile()
-        if hologram_file is None and np.any(self.phasePattern):
-            print("Profile: the displayed hologram is not saved to a file and is not remembered (Save Hologram to keep it)")
-        section["mode"] = StaticMode.name
-        section["static"] = {"last_hologram": hologram_file or NO_LAST_HOLOGRAM}
-        section.setdefault("dynamic", {})
+        section["mode"] = self.operation_mode.name
+        if isinstance(self.operation_mode, StaticMode):
+            hologram_file = self._arbitrary.displayedHologramFile()
+            if hologram_file is None and np.any(self.phasePattern):
+                print("Profile: the displayed hologram is not saved to a file and is not remembered (Save Hologram to keep it)")
+            section["static"] = {"last_hologram": hologram_file or NO_LAST_HOLOGRAM}
+        elif not isinstance(section.get("static"), dict):
+            section["static"] = {"last_hologram": NO_LAST_HOLOGRAM}
+        dynamic = section.get("dynamic")
+        section["dynamic"] = dict(dynamic) if isinstance(dynamic, dict) else {}
+        if self.trigger_timeout_ms is not None:
+            section["dynamic"][TRIGGER_TIMEOUT_PROFILE_KEY] = int(self.trigger_timeout_ms)
+        section["dynamic"][HOLOGRAMS_PROFILE_KEY] = self._operation_mode_panel.mode(DynamicMode).profileHolograms()
         self._profile_operation_mode = copy.deepcopy(section)
         return section
 
     def _applyProfileOperationMode(self, operation_mode: dict[str, Any]) -> None:
-        """Select the Static mode and display the profile's last hologram file (if not "none"); other modes are not restored yet."""
-        mode = operation_mode.get("mode", StaticMode.name)
-        if mode != StaticMode.name:
-            print(f"Profile: operation mode {mode!r} is not restored (in development); using {StaticMode.name}")
-        if not isinstance(self.operation_mode, StaticMode):
-            self._operation_mode_panel.setOperationMode(StaticMode)
+        """Restore the operation mode: trigger timeout and frame holograms of the Dynamic mode, the selected mode,
+        and the Static last hologram file (displayed if not "none", also in Dynamic mode until Arm).
+
+        While a frame sequence is running only the timeout is set (used from the next Arm).
+        """
+        dynamic = operation_mode.get("dynamic", {})
+        if not isinstance(dynamic, dict):
+            dynamic = {}
+        timeout_ms = dynamic.get(TRIGGER_TIMEOUT_PROFILE_KEY)
+        if isinstance(timeout_ms, (int, float)) and not isinstance(timeout_ms, bool):
+            self.setTriggerTimeoutMs(timeout_ms)
+        else:
+            print(f"Profile: operation_mode.dynamic.{TRIGGER_TIMEOUT_PROFILE_KEY} missing or not a number ({timeout_ms!r}): check {PROFILE_TEMPLATE_FILE}")
+        if self.sequenceIsRunning():
+            print("Profile: a frame sequence is running: operation mode, frame holograms and Static hologram are not changed")
+            return
+        panel = self._operation_mode_panel
+        holograms = dynamic.get(HOLOGRAMS_PROFILE_KEY, [])
+        if not isinstance(holograms, list):
+            print(f"Profile: operation_mode.dynamic.{HOLOGRAMS_PROFILE_KEY} is not a list ({holograms!r}): no frames loaded")
+            holograms = []
+        problems = panel.mode(DynamicMode).loadProfileHolograms(holograms)
+        panel.page(DynamicMode).reloadSlots()
+        if problems:
+            text = f"Profile {self.current_profile!r}: these Dynamic mode holograms could not be loaded (their frames are left empty):\n" + "\n".join(problems)
+            print(text.replace("\n", " "))
+            QtWidgets.QMessageBox.warning(self, "Profile holograms", text)
+        mode_name = operation_mode.get("mode", StaticMode.name)
+        mode_cls = panel.modeByName(mode_name) if isinstance(mode_name, str) else None
+        if mode_cls is None:
+            print(f"Profile: unknown operation mode {mode_name!r}; using {StaticMode.name}")
+            mode_cls = StaticMode
+        if not isinstance(self.operation_mode, mode_cls):
+            panel.setOperationMode(mode_cls)
         static = operation_mode.get("static", {})
         hologram_file = static.get("last_hologram", NO_LAST_HOLOGRAM) if isinstance(static, dict) else NO_LAST_HOLOGRAM
         if not hologram_file or hologram_file == NO_LAST_HOLOGRAM:
@@ -1132,16 +1414,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         if "board" in params and board is None:
             print(f"Ignoring invalid board {params['board']!r} in profile {self.current_profile!r}")
         self.board = board
-        grating, corrections, pupil, aberration = params["grating"], params["corrections"], params["pupil"], params["aberration"]
+        elementary, corrections, pupil, aberration = params["elementary"], params["corrections"], params["pupil"], params["aberration"]
+        grating = elementary["grating"]
         missing = [label for label in self.aberration_label_list if label not in aberration]
         if missing:
             raise ValueError(f"Profile has no value for aberration(s) {missing}: check {PROFILE_TEMPLATE_FILE}")
         self._suspend_phase_updates = True
         try:
-            self.param_P = grating["phase_levels"]
-            self.elementary.paramPEdt.setText(self._formatNumber(grating["phase_levels"]))
-            self.wavelength_m = grating["wavelength_nm"] / 1e9
-            self.elementary.paramWavelengthEdit.setText(self._formatNumber(grating["wavelength_nm"]))
+            self.param_P = elementary["phase_levels"]
+            self.elementary.paramPEdt.setText(self._formatNumber(elementary["phase_levels"]))
+            self.wavelength_m = elementary["wavelength_nm"] / 1e9
+            self.elementary.paramWavelengthEdit.setText(self._formatNumber(elementary["wavelength_nm"]))
             for box, checked in ((self._ManufacturerCorrectionChkBx, corrections["manufacturer"]), (self._zernikeCorrectionChkBx, corrections["aberration"]), (self._pupilChkBx, pupil["enabled"])):
                 box.blockSignals(True)
                 box.setChecked(checked)
@@ -1473,6 +1756,9 @@ class SLMGUI(QtWidgets.QMainWindow):
             return
         if self._sequence_is_loaded:
             print("Hologram not sent: a frame sequence is loaded on the SLM")
+            return
+        if np.shape(self.phasePattern) != self.SLM_shape:
+            print(f"Hologram not sent: it is {np.shape(self.phasePattern)[::-1]} px, the SLM is {self.SLM_shape[::-1]} px (width, height)")
             return
         self.totalPhase = composeSlmFrame(self.phasePattern, self._frameTerms())
         if self.SLM is not None:

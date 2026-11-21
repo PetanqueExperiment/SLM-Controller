@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from gui.paths import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE
+from gui.paths import DEFAULT_PROFILE, DEFAULT_STARTUP_MODE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, SETTINGS_FILE, SIMULATED_SLM_DEFAULTS_FILE
 from gui.paths import STARTUP_FIXED, STARTUP_LAST_USED, STARTUP_MODES
 
 
@@ -87,7 +87,7 @@ def writeProfile(name: str, params: dict[str, Any]) -> Path:
 
 
 class ProfileTemplateError(RuntimeError):
-    """The default profile template in the repository (profile_templates/default.json) is missing or invalid."""
+    """The default profile template in the repository (defaults/profiles/default.json) is missing or invalid."""
 
 
 def loadProfileTemplate() -> dict[str, Any]:
@@ -105,6 +105,36 @@ def _sameKind(default: Any, value: Any) -> bool:
     if isinstance(default, (int, float)):
         return isinstance(value, (int, float))
     return isinstance(value, type(default))
+
+
+OLD_GRATING_SECTION: str = "grating"
+ELEMENTARY_SECTION: str = "elementary"
+ELEMENTARY_KEYS: tuple[str, ...] = ("phase_levels", "wavelength_nm")
+
+
+def migrateProfile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Profile in the current layout. Old profiles have a top-level "grating" {x_um, y_um, phase_levels,
+    wavelength_nm}: phase_levels and wavelength_nm move to "elementary", x_um / y_um to "elementary" ▸ "grating".
+
+    Values already in the new place are kept. ``profile`` itself is not changed.
+    """
+    if OLD_GRATING_SECTION not in profile:
+        return profile
+    migrated = copy.deepcopy(profile)
+    old = migrated.pop(OLD_GRATING_SECTION)
+    if not isinstance(old, dict):
+        print(f"Profile: ignoring old {OLD_GRATING_SECTION!r} = {old!r} (expected a section)")
+        return migrated
+    elementary = migrated.get(ELEMENTARY_SECTION)
+    elementary = dict(elementary) if isinstance(elementary, dict) else {}
+    grating = elementary.get(OLD_GRATING_SECTION)
+    grating = dict(grating) if isinstance(grating, dict) else {}
+    for key, value in old.items():
+        target = elementary if key in ELEMENTARY_KEYS else grating
+        target.setdefault(key, value)
+    elementary[OLD_GRATING_SECTION] = grating
+    migrated[ELEMENTARY_SECTION] = elementary
+    return migrated
 
 
 def mergeProfile(template: dict[str, Any], profile: dict[str, Any], where: str = "") -> dict[str, Any]:
@@ -140,7 +170,7 @@ def loadProfileParams(name: str) -> tuple[dict[str, Any], str]:
     template = loadProfileTemplate()
     profile = readProfile(name)
     if profile is not None:
-        return mergeProfile(template, profile), PROFILE_LOADED
+        return mergeProfile(template, migrateProfile(profile)), PROFILE_LOADED
     return template, PROFILE_UNREADABLE if profilePath(name).exists() else PROFILE_MISSING
 
 
@@ -169,6 +199,35 @@ def listProfiles() -> list[str]:
 
 
 SIMULATED_BOARD: int = 0  # reserved "board" of the permanent Simulated SLM; real Blink boards are numbered from 1
+MIN_SLM_PIXEL_PITCH_UM: float = 1.0  # plausible range of a reported pixel pitch (Get_pixel_pitch has no documented unit)
+MAX_SLM_PIXEL_PITCH_UM: float = 100.0
+MAX_SLM_RADIUS_M: float = 0.1
+SIMULATED_SLM_KEY: str = "simulated_slm"
+WFC_KEY: str = "wfc"  # devices.json: name of the device's WFC .bmp
+OLD_WFC_KEY: str = "factory_lut"  # earlier name of WFC_KEY, still read
+
+
+def parseSlmRadiusM(value: Any) -> float | None:
+    """SLM radius [m] from a JSON value: a number in (0, MAX_SLM_RADIUS_M]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if 0 < value <= MAX_SLM_RADIUS_M else None
+
+
+def parsePixelPitchUm(value: Any) -> float | None:
+    """Pixel pitch [µm] from a JSON value: a number within MIN_SLM_PIXEL_PITCH_UM … MAX_SLM_PIXEL_PITCH_UM."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if MIN_SLM_PIXEL_PITCH_UM <= value <= MAX_SLM_PIXEL_PITCH_UM else None
+
+
+def parseImageSize(value: Any) -> int | None:
+    """Image width or height from a JSON value: a positive int (bools and other types are rejected)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def parseBoard(value: Any) -> int | None:
@@ -185,36 +244,124 @@ def parseSerial(value: Any) -> int | None:
     return value
 
 
+class DeviceDefaultsError(RuntimeError):
+    """The Simulated SLM defaults in the repository (defaults/devices/simulated_slm.json) are missing or invalid."""
+
+
+@dataclass(frozen=True)
+class DeviceGeometry:
+    """Image size [px], pixel pitch [µm] and SLM radius [m] (Zernike unit disk) of an SLM."""
+
+    width_px: int
+    height_px: int
+    pixel_pitch_um: float
+    slm_radius_m: float
+
+
+_device_defaults_cache: dict[Path, DeviceGeometry] = {}
+
+
+def loadDeviceDefaults(path: Path = SIMULATED_SLM_DEFAULTS_FILE) -> DeviceGeometry:
+    """Default geometry of the Simulated SLM, also used by a real SLM until it has reported its own (read once)."""
+    if path in _device_defaults_cache:
+        return _device_defaults_cache[path]
+    doc = _read_json(path)
+    if doc is None:
+        raise DeviceDefaultsError(f"Simulated SLM defaults missing or invalid: {path}")
+    values = (parseImageSize(doc.get("width_px")), parseImageSize(doc.get("height_px")), parsePixelPitchUm(doc.get("pixel_pitch_um")), parseSlmRadiusM(doc.get("slm_radius_m")))
+    if any(v is None for v in values):
+        raise DeviceDefaultsError(f"Simulated SLM defaults need width_px, height_px (positive integers), pixel_pitch_um ({MIN_SLM_PIXEL_PITCH_UM:g} … {MAX_SLM_PIXEL_PITCH_UM:g}) and slm_radius_m (0 … {MAX_SLM_RADIUS_M:g}): {path}")
+    defaults = DeviceGeometry(*values)
+    _device_defaults_cache[path] = defaults
+    return defaults
+
+
 @dataclass
 class Device:
     """One SLM: the Blink board it is on and, once known, its serial number. Board SIMULATED_BOARD is the Simulated SLM."""
 
     board: int
     serial: int | None = None
-    factory_lut: str = ""  # name (no extension) of the factory correction (WFC) .bmp in devices/; "" = none set
+    factory_lut: str = ""  # name (no extension) of the factory correction (WFC) .bmp in devices/; "" = none set (JSON key "wfc")
     lut: str = ""
+    width_px: int | None = None  # image size reported by the SLM at its last connect (Simulated SLM: set by hand)
+    height_px: int | None = None
+    pixel_pitch_um: float | None = None  # pixel pitch reported by the SLM at its last connect (Simulated SLM: set by hand)
+    slm_radius_m: float | None = None  # radius of the Zernike unit disk on the SLM, centred on the SLM (set by hand)
+    name: str | None = None  # set to defaultDeviceName(serial) at the first connect; editable
 
     @property
     def simulated(self) -> bool:
         return self.board == SIMULATED_BOARD
 
+    def imageShape(self) -> tuple[int, int]:
+        """(height, width) [px]: the stored size, or the default size if not known yet."""
+        if self.width_px is None or self.height_px is None:
+            defaults = loadDeviceDefaults()
+            return defaults.height_px, defaults.width_px
+        return self.height_px, self.width_px
+
+    def pixelPitchUm(self) -> float:
+        """Pixel pitch [µm]: the stored one, or the default if not known yet."""
+        return loadDeviceDefaults().pixel_pitch_um if self.pixel_pitch_um is None else self.pixel_pitch_um
+
+    def slmRadiusM(self) -> float:
+        """SLM radius [m]: the stored one, or the default if not set."""
+        return loadDeviceDefaults().slm_radius_m if self.slm_radius_m is None else self.slm_radius_m
+
     def toDict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"board": self.board}
+        d: dict[str, Any] = {} if self.name is None else {"name": self.name}
+        d["board"] = self.board
         if self.serial is not None:
             d["serial"] = self.serial
-        d["factory_lut"] = self.factory_lut
+        d[WFC_KEY] = self.factory_lut
         d["lut"] = self.lut
+        if self.width_px is not None and self.height_px is not None:
+            d["width_px"] = self.width_px
+            d["height_px"] = self.height_px
+        if self.pixel_pitch_um is not None:
+            d["pixel_pitch_um"] = self.pixel_pitch_um
+        if self.slm_radius_m is not None:
+            d["slm_radius_m"] = self.slm_radius_m
         return d
+
+
+def _readImageSize(entry: dict[str, Any], what: str, path: Path) -> tuple[int | None, int | None]:
+    width, height = parseImageSize(entry.get("width_px")), parseImageSize(entry.get("height_px"))
+    if ("width_px" in entry or "height_px" in entry) and (width is None or height is None):
+        print(f"Ignoring invalid image size {entry.get('width_px')!r} x {entry.get('height_px')!r} for {what} in {path}")
+        return None, None
+    return width, height
+
+
+def _readPixelPitch(entry: dict[str, Any], what: str, path: Path) -> float | None:
+    pitch_um = parsePixelPitchUm(entry.get("pixel_pitch_um"))
+    if "pixel_pitch_um" in entry and pitch_um is None:
+        print(f"Ignoring invalid pixel pitch {entry.get('pixel_pitch_um')!r} µm for {what} in {path}")
+    return pitch_um
+
+
+def _readSlmRadius(entry: dict[str, Any], what: str, path: Path) -> float | None:
+    radius_m = parseSlmRadiusM(entry.get("slm_radius_m"))
+    if "slm_radius_m" in entry and radius_m is None:
+        print(f"Ignoring invalid SLM radius {entry.get('slm_radius_m')!r} m for {what} in {path}")
+    return radius_m
 
 
 def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
     """The Simulated SLM (always first), then the devices in ``devices/devices.json`` sorted by board.
 
-    Invalid entries are dropped and the first entry wins per board. The Simulated SLM is permanent: it is never read
-    from or written to the file.
+    Invalid entries are dropped and the first entry wins per board. The Simulated SLM is permanent; only its image
+    size is stored in the file (``simulated_slm``).
     """
-    devices: dict[int, Device] = {SIMULATED_BOARD: Device(SIMULATED_BOARD)}
     doc = _read_json(path) or {}
+    simulated = Device(SIMULATED_BOARD)
+    entry = doc.get(SIMULATED_SLM_KEY)
+    if isinstance(entry, dict):
+        simulated.width_px, simulated.height_px = _readImageSize(entry, "the Simulated SLM", path)
+        simulated.pixel_pitch_um = _readPixelPitch(entry, "the Simulated SLM", path)
+        simulated.slm_radius_m = _readSlmRadius(entry, "the Simulated SLM", path)
+    devices: dict[int, Device] = {SIMULATED_BOARD: simulated}
     entries = doc.get("devices", [])
     if not isinstance(entries, list):
         print(f"Ignoring 'devices' in {path}: expected a list")
@@ -230,22 +377,33 @@ def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
         serial = parseSerial(entry.get("serial"))
         if "serial" in entry and entry["serial"] is not None and serial is None:
             print(f"Ignoring invalid serial {entry['serial']!r} for board {board} in {path}")
-        factory_lut = entry.get("factory_lut", "")
+        factory_lut = entry.get(WFC_KEY, entry.get(OLD_WFC_KEY, ""))
         if not isinstance(factory_lut, str):
-            print(f"Ignoring invalid factory_lut {factory_lut!r} for board {board} in {path}")
+            print(f"Ignoring invalid wfc {factory_lut!r} for board {board} in {path}")
             factory_lut = ""
         lut = entry.get("lut", "")
         if not isinstance(lut, str):
             print(f"Ignoring invalid lut {lut!r} for board {board} in {path}")
             lut = ""
-        devices[board] = Device(board, serial, factory_lut.strip(), lut.strip())
+        width, height = _readImageSize(entry, f"board {board}", path)
+        name = entry.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            print(f"Ignoring invalid name {name!r} for board {board} in {path}")
+            name = None
+        devices[board] = Device(board, serial, factory_lut.strip(), lut.strip(), width, height, _readPixelPitch(entry, f"board {board}", path), _readSlmRadius(entry, f"board {board}", path), None if name is None else name.strip())
     return [devices[b] for b in sorted(devices)]
 
 
 def saveDevices(devices: list[Device], path: Path = DEVICES_FILE) -> None:
-    """Write the real devices (the Simulated SLM is not stored)."""
+    """Write the real devices, and the image size of the Simulated SLM if it is set."""
     unique = {d.board: d for d in reversed(devices) if not d.simulated}
-    _write_json(path, {"devices": [unique[b].toDict() for b in sorted(unique)]})
+    doc: dict[str, Any] = {"devices": [unique[b].toDict() for b in sorted(unique)]}
+    simulated = next((d for d in devices if d.simulated), None)
+    if simulated is not None:
+        entry = {key: value for key, value in simulated.toDict().items() if key in ("width_px", "height_px", "pixel_pitch_um", "slm_radius_m")}
+        if entry:
+            doc[SIMULATED_SLM_KEY] = entry
+    _write_json(path, doc)
 
 
 def findDevice(board: int, path: Path = DEVICES_FILE) -> Device | None:
@@ -296,6 +454,83 @@ def setDeviceLut(board: int, name: str, path: Path = DEVICES_FILE) -> bool:
 def deviceLabel(device: Device) -> str:
     """Name shown in the GUI: 'Simulated SLM' or 'Board N'."""
     return "Simulated SLM" if device.simulated else f"Board {device.board}"
+
+
+def deviceImageShape(board: int | None, path: Path = DEVICES_FILE) -> tuple[int, int]:
+    """(height, width) [px] stored for ``board`` (the default size if unknown, not listed, or no board)."""
+    device = None if board is None else findDevice(board, path)
+    return Device(SIMULATED_BOARD).imageShape() if device is None else device.imageShape()
+
+
+def setDeviceImageSize(board: int, width_px: int, height_px: int, path: Path = DEVICES_FILE) -> bool:
+    """Record the image size of the device on ``board`` (also the Simulated SLM); False if the board is not listed."""
+    if parseImageSize(width_px) is None or parseImageSize(height_px) is None:
+        raise ValueError(f"image size must be positive integers, got {width_px!r} x {height_px!r}")
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board:
+            device.width_px, device.height_px = width_px, height_px
+            saveDevices(devices, path)
+            return True
+    return False
+
+
+def devicePixelPitchUm(board: int | None, path: Path = DEVICES_FILE) -> float:
+    """Pixel pitch [µm] stored for ``board`` (the default if unknown, not listed, or no board)."""
+    device = None if board is None else findDevice(board, path)
+    return Device(SIMULATED_BOARD).pixelPitchUm() if device is None else device.pixelPitchUm()
+
+
+def setDevicePixelPitchUm(board: int, pitch_um: float, path: Path = DEVICES_FILE) -> bool:
+    """Record the pixel pitch [µm] of the device on ``board`` (also the Simulated SLM); False if the board is not listed."""
+    value = parsePixelPitchUm(pitch_um)
+    if value is None:
+        raise ValueError(f"pixel pitch must be {MIN_SLM_PIXEL_PITCH_UM:g} … {MAX_SLM_PIXEL_PITCH_UM:g} µm, got {pitch_um!r}")
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board:
+            device.pixel_pitch_um = value
+            saveDevices(devices, path)
+            return True
+    return False
+
+
+def deviceSlmRadiusM(board: int | None, path: Path = DEVICES_FILE) -> float:
+    """SLM radius [m] stored for ``board`` (the default if not set, not listed, or no board)."""
+    device = None if board is None else findDevice(board, path)
+    return Device(SIMULATED_BOARD).slmRadiusM() if device is None else device.slmRadiusM()
+
+
+def setDeviceSlmRadiusM(board: int, radius_m: float, path: Path = DEVICES_FILE) -> bool:
+    """Record the SLM radius [m] of the device on ``board`` (also the Simulated SLM); False if the board is not listed."""
+    value = parseSlmRadiusM(radius_m)
+    if value is None:
+        raise ValueError(f"SLM radius must be in (0, {MAX_SLM_RADIUS_M:g}] m, got {radius_m!r}")
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board:
+            device.slm_radius_m = value
+            saveDevices(devices, path)
+            return True
+    return False
+
+
+def defaultDeviceName(serial: int) -> str:
+    """Name given to a device at its first connect: 'slm' followed by its serial number."""
+    return f"slm{serial}"
+
+
+def setDeviceName(board: int, name: str, path: Path = DEVICES_FILE) -> bool:
+    """Record ``name`` for the listed real device on ``board``; False if not listed. Raises ValueError if empty."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"device name must not be empty, got {name!r}")
+    devices = loadDevices(path)
+    for device in devices:
+        if device.board == board and not device.simulated:
+            device.name = name.strip()
+            saveDevices(devices, path)
+            return True
+    return False
 
 
 def setDeviceSerial(board: int, serial: int, path: Path = DEVICES_FILE) -> bool:

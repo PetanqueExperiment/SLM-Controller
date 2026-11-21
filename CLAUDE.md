@@ -25,10 +25,14 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
     serial-number check before the LUT is loaded, `uploadHologram`,
     `readTemperature`, `loadLut`, simulate mode. One SDK session per process.
   - `gpu.py` — OpenCL hologram kernels: `trap_phase_to_slm`, `slm_to_trap_amp`.
-- `gui/parameters.py` — optical / device parameters as `param.<name>` (`f`, `M`, `pslm`,
-  image size, Zernike radius), loaded by `SLMGUI` at every start from the working
-  directory's `parameters/parameters.json` (defaults: `profile_templates/parameters.json`).
-  Wavelength and P are NOT here: they come from the profile.
+- `gui/parameters.py` — optical parameters as `param.<name>` (`f`, `M`), loaded by `SLMGUI` at
+  every start from the working directory's `parameters/parameters.json` (defaults:
+  `defaults/parameters/parameters.json`; Settings ▸ Parameters…). The SLM geometry is NOT in that
+  file: image size (`param.ImgResX/ImgResY`), pixel pitch (`param.pslm`) and SLM radius (Zernike
+  disk, `param.max_radius`) come from the device (`devices.json`; size and pitch reported by the SLM
+  at connect, radius set with Device ▸ Set device parameters…; defaults and the Simulated SLM:
+  `defaults/devices/simulated_slm.json`; the GUI rebuilds if they change).
+  Wavelength and phase levels are NOT here either: they come from the profile.
 - `gui/main_window.py` — `SLMGUI`: shared phase state, `updatePhase()` (the only
   path that sends frames), menus (Device / Profile / Settings), docks.
 - `gui/panels/` — one panel per file; `arbitrary_arrays/` is a package
@@ -39,13 +43,13 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
 - `gui/settings.py` — settings, profiles, device list (JSON I/O, no Qt).
 - `gui/paths.py` — working-directory paths; `gui/constants.py` — shared values
   and the µm → phase factors `positionToStepPerPixel(wavelength_m)`.
-- `profile_templates/default.json` — tracked default values of every profile
+- `defaults/profiles/default.json` — tracked default values of every profile
   parameter; working profiles only override it. Values do not belong in code.
 - `tests/` — pytest: `python -m pytest tests` (fake Blink DLL in `tests/test_slm.py`).
 
 ## Working directory (`~/petanque_dev/SLM/`, outside the repo)
 `settings/settings.json` (startup mode, last profile), `parameters/parameters.json` (optical / device parameters, created from the template if missing), `profiles/<name>.json`,
-`devices/devices.json` (board, serial, `factory_lut` and `lut` per real SLM; the Simulated SLM is built in and uses no correction), `devices/<factory_lut>.bmp` (per-SLM manufacturer wavefront correction (WFC), loaded as `SLMGUI.factory_lut`, Device ▸ Set WFC…), `devices/<lut>.LUT` (per-SLM controller LUT loaded at connect, Device ▸ Set LUT…; none set = no LUT loaded, the controller keeps its current one), `logs/` (temperature CSVs, also
+`devices/devices.json` (`name` (`slm<serial>` at the first connect, editable), board, serial, `wfc` and `lut`, `width_px` / `height_px` / `pixel_pitch_um` / `slm_radius_m` per real SLM; the Simulated SLM is built in, uses no correction, and only its geometry is stored, under `simulated_slm` (defaults: `defaults/devices/simulated_slm.json`); old key `factory_lut` is still read), `devices/<wfc>.bmp` (per-SLM manufacturer wavefront correction (WFC), loaded as `SLMGUI.factory_lut`, Device ▸ Set device parameters…), `devices/<lut>.LUT` (per-SLM controller LUT loaded at connect, Device ▸ Set device parameters…; none set = no LUT loaded, the controller keeps its current one), `logs/` (temperature CSVs, also
 written to `temperature_logs/` in the repo; not in simulate mode).
 
 ## How to work here

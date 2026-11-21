@@ -1,5 +1,7 @@
 """Tests for gui/sequence_run.py (trigger loop of the dynamic mode) and gui/slm_frame.py (frame composition)."""
 
+import time
+
 import numpy as np
 import pytest
 
@@ -11,12 +13,17 @@ SHAPE = (4, 6)
 
 
 class FakeSequenceSLM:
-    """Records Select_image calls; ``triggers`` triggers arrive, then every wait times out."""
+    """Records Select_image calls. Like the SLM, the first trigger wait completes at once without a trigger
+    (``spurious_first``). The following waits follow ``waits`` (True = trigger, False = timeout), then time out;
+    ``triggers=n`` is ``waits=[True] * n``. ``first_wait_s`` delays the first trigger wait (a real trigger)."""
 
-    def __init__(self, triggers, load_error=None, select_error_at=None):
-        self.triggers_left = triggers
+    def __init__(self, triggers=0, load_error=None, select_error_at=None, waits=None, spurious_first=True, first_wait_s=0.0):
+        self.waits = list(waits) if waits is not None else [True] * triggers
         self.load_error = load_error
         self.select_error_at = select_error_at
+        self.spurious_first = spurious_first
+        self.first_wait_s = first_wait_s
+        self.trigger_waits = 0
         self.sequence_length = None
         self.selected = []
         self.loaded = None
@@ -33,10 +40,13 @@ class FakeSequenceSLM:
             raise RuntimeError("DLL failure")
         if not wait_for_trigger:
             return True
-        if self.triggers_left == 0:
-            return False
-        self.triggers_left -= 1
-        return True
+        self.trigger_waits += 1
+        if self.trigger_waits == 1:
+            if self.first_wait_s:
+                time.sleep(self.first_wait_s)
+            if self.spurious_first:
+                return True
+        return self.waits.pop(0) if self.waits else False
 
     def lastErrorMessage(self):
         return "timeout"
@@ -46,56 +56,105 @@ def _frames(n):
     return [np.full(SHAPE, i, np.uint8) for i in range(n)]
 
 
+def _run(slm, n, stop=lambda: False, **kwargs):
+    return playSequence(slm, _frames(n), timeout_ms=kwargs.pop("timeout_ms", 10), flip_immediate=kwargs.pop("flip_immediate", False), stop_requested=stop, **kwargs)
+
+
 def test_frames_advance_per_trigger_and_wrap_to_frame_0():
     slm = FakeSequenceSLM(triggers=4)
-    armed = []
-    result = playSequence(slm, _frames(3), timeout_ms=200, flip_immediate=True, stop_requested=lambda: False, on_armed=lambda: armed.append(True))
-    assert armed == [True] and len(slm.loaded) == 3
-    assert [s[0] for s in slm.selected] == [0, 1, 2, 0, 1, 2]
+    armed, counts = [], []
+    result = _run(slm, 3, timeout_ms=200, flip_immediate=True, on_armed=lambda: armed.append(True), on_trigger=counts.append)
+    assert armed == [True] and len(slm.loaded) == 3 and counts == [1, 2, 3, 4]
+    assert [s[0] for s in slm.selected] == [0, 0, 1, 2, 0, 1, 2]
     assert slm.selected[0] == (0, False, 5000, True)
     assert all(s[1:] == (True, 200, True) for s in slm.selected[1:])
     assert (result.reason, result.triggers, result.last_frame, result.message) == (RUN_NO_TRIGGER, 4, 1, "timeout")
 
 
+def test_spurious_first_completion_is_not_counted():
+    slm = FakeSequenceSLM(triggers=0)
+    lines, counts = [], []
+    result = _run(slm, 2, stop=lambda: len(slm.selected) >= 4, on_trigger=counts.append, log=lines.append)
+    assert counts == [] and [s[0] for s in slm.selected] == [0, 0, 1, 1]
+    assert lines[0].startswith("Arm: first trigger wait completed after") and lines[0].endswith("(ignored)")
+    assert (result.reason, result.triggers, result.last_frame) == (RUN_STOPPED, 0, 0)
+
+
+def test_real_trigger_during_the_extra_wait_is_counted_and_keeps_alignment():
+    slm = FakeSequenceSLM(waits=[True, True], first_wait_s=0.01)
+    lines = []
+    result = _run(slm, 3, log=lines.append)
+    assert "the first trigger came" in lines[0]
+    assert [s[0] for s in slm.selected] == [0, 0, 2, 0, 1]
+    assert (result.reason, result.triggers, result.last_frame) == (RUN_NO_TRIGGER, 3, 0)
+
+
+def test_without_spurious_completion_the_run_still_waits_for_the_first_trigger():
+    slm = FakeSequenceSLM(waits=[False, False, True], spurious_first=False)
+    lines = []
+    result = _run(slm, 2, log=lines.append)
+    assert lines[0].startswith("Arm: no early completion")
+    assert [s[0] for s in slm.selected] == [0, 0, 1, 1, 0]
+    assert (result.reason, result.triggers, result.last_frame) == (RUN_NO_TRIGGER, 1, 1)
+
+
 def test_single_frame_sequence_keeps_frame_0():
     slm = FakeSequenceSLM(triggers=2)
-    result = playSequence(slm, _frames(1), timeout_ms=10, flip_immediate=False, stop_requested=lambda: False)
-    assert [s[0] for s in slm.selected] == [0, 0, 0, 0]
+    result = _run(slm, 1)
+    assert [s[0] for s in slm.selected] == [0, 0, 0, 0, 0]
     assert (result.reason, result.triggers, result.last_frame) == (RUN_NO_TRIGGER, 2, 0)
 
 
 def test_stop_ends_after_the_current_wait():
     slm = FakeSequenceSLM(triggers=100)
-    result = playSequence(slm, _frames(2), timeout_ms=10, flip_immediate=False, stop_requested=lambda: len(slm.selected) >= 3)
+    result = _run(slm, 2, stop=lambda: len(slm.selected) >= 4)
     assert (result.reason, result.triggers, result.last_frame) == (RUN_STOPPED, 2, 0)
+
+
+def test_no_timeout_exit_before_the_first_trigger():
+    slm = FakeSequenceSLM(waits=[False, False, False, True, True])
+    result = _run(slm, 2)
+    assert [s[0] for s in slm.selected] == [0, 0, 1, 1, 1, 1, 0, 1]
+    assert (result.reason, result.triggers, result.last_frame) == (RUN_NO_TRIGGER, 2, 0)
 
 
 def test_timeout_after_stop_counts_as_stopped():
     slm = FakeSequenceSLM(triggers=0)
-    result = playSequence(slm, _frames(2), timeout_ms=10, flip_immediate=False, stop_requested=lambda: len(slm.selected) >= 2)
+    result = _run(slm, 2, stop=lambda: len(slm.selected) >= 3)
     assert (result.reason, result.triggers, result.last_frame) == (RUN_STOPPED, 0, 0)
 
 
 def test_load_failure_shows_nothing():
     slm = FakeSequenceSLM(triggers=1, load_error="Load_sequence returned -1")
     armed = []
-    result = playSequence(slm, _frames(2), timeout_ms=10, flip_immediate=False, stop_requested=lambda: False, on_armed=lambda: armed.append(True))
+    result = _run(slm, 2, on_armed=lambda: armed.append(True))
     assert armed == [] and slm.selected == []
     assert (result.reason, result.last_frame) == (RUN_ERROR, None) and "Load_sequence returned -1" in result.message
 
 
 def test_dll_error_during_run():
-    slm = FakeSequenceSLM(triggers=5, select_error_at=3)
-    result = playSequence(slm, _frames(3), timeout_ms=10, flip_immediate=False, stop_requested=lambda: False)
+    slm = FakeSequenceSLM(triggers=5, select_error_at=4)
+    result = _run(slm, 3)
     assert (result.reason, result.triggers, result.last_frame) == (RUN_ERROR, 1, 1) and "DLL failure" in result.message
 
 
-def test_simulated_slm_run_ends_after_one_timeout():
-    slm = MeadowlarkSLM(simulate=True, expected_shape=SHAPE)
+def test_wait_log():
+    slm = FakeSequenceSLM(waits=[False, True, True, True])
+    lines = []
+    _run(slm, 2, log=lines.append)
+    assert [s[0] for s in slm.selected] == [0, 0, 1, 1, 0, 1, 0]
+    assert len(lines) == 6
+    assert lines[1].startswith("Sequence wait 1: frame 2 selected, no trigger after")
+    assert lines[2].startswith("Sequence wait 2: frame 2 selected, trigger after") and lines[3].startswith("Sequence wait 3: frame 1 selected, trigger")
+
+
+def test_simulated_slm_waits_for_the_first_trigger_until_stop():
+    slm = MeadowlarkSLM(1, simulate=True, expected_shape=SHAPE)
     slm.connect()
+    waits = []
     try:
-        result = playSequence(slm, _frames(2), timeout_ms=1, flip_immediate=False, stop_requested=lambda: False)
-        assert (result.reason, result.triggers, result.last_frame) == (RUN_NO_TRIGGER, 0, 0)
+        result = _run(slm, 2, timeout_ms=1, stop=lambda: waits.append(1) or len(waits) > 5)
+        assert (result.reason, result.triggers, result.last_frame) == (RUN_STOPPED, 0, 0)
         assert np.array_equal(slm.getLastHologram(), _frames(2)[0])
     finally:
         slm.disconnect()
@@ -130,3 +189,4 @@ def test_terms_copy_is_independent():
     copied = terms.copy()
     terms.zernike_rad[0, 0] = 1.0
     assert copied.zernike_rad[0, 0] == 0.0 and copied.wfc_rad is None
+
