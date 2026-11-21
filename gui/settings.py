@@ -387,7 +387,7 @@ def loadDevices(path: Path = DEVICES_FILE) -> list[Device]:
             lut = ""
         width, height = _readImageSize(entry, f"board {board}", path)
         name = entry.get("name")
-        if name is not None and (not isinstance(name, str) or not name.strip()):
+        if name is not None and not isValidDeviceName(name.strip() if isinstance(name, str) else name):
             print(f"Ignoring invalid name {name!r} for board {board} in {path}")
             name = None
         devices[board] = Device(board, serial, factory_lut.strip(), lut.strip(), width, height, _readPixelPitch(entry, f"board {board}", path), _readSlmRadius(entry, f"board {board}", path), None if name is None else name.strip())
@@ -419,8 +419,59 @@ def addDevice(board: int, path: Path = DEVICES_FILE) -> bool:
     return True
 
 
+HOLOGRAMS_DIR_NAME: str = "holograms"
+SIMULATED_DEVICE_DIR_NAME: str = "simulated_slm"
+
+
+def deviceDirName(device: Device) -> str:
+    """Folder of ``device`` under devices/: its name, 'board<N>' until it has one, 'simulated_slm' for the Simulated SLM."""
+    if device.simulated:
+        return SIMULATED_DEVICE_DIR_NAME
+    return device.name or f"board{device.board}"
+
+
+def deviceDir(device: Device, devices_dir: Path | None = None) -> Path:
+    """devices/<deviceDirName>: holds the device's LUT, WFC and holograms/ folder."""
+    return (DEVICES_DIR if devices_dir is None else devices_dir) / deviceDirName(device)
+
+
+def _deviceFile(device: Device, file_name: str, devices_dir: Path | None) -> Path:
+    in_folder = deviceDir(device, devices_dir) / file_name
+    old_place = (DEVICES_DIR if devices_dir is None else devices_dir) / file_name
+    return old_place if not in_folder.is_file() and old_place.is_file() else in_folder
+
+
+def deviceWfcPath(device: Device, devices_dir: Path | None = None) -> Path:
+    """The device's WFC .bmp: in its folder (or, until copied there, directly in devices/ as before)."""
+    return _deviceFile(device, f"{device.factory_lut}.bmp", devices_dir)
+
+
+def deviceLutPath(device: Device, devices_dir: Path | None = None) -> Path:
+    """The device's LUT file: in its folder (or, until copied there, directly in devices/ as before)."""
+    return _deviceFile(device, f"{device.lut}.LUT", devices_dir)
+
+
+def prepareDeviceDir(device: Device, devices_dir: Path | None = None) -> list[str]:
+    """Create the device folder and its holograms/ folder; copy a WFC / LUT still stored directly in devices/ into it.
+
+    The old copies are left in place (another device may use them). Returns the names of the copied files.
+    """
+    root = DEVICES_DIR if devices_dir is None else devices_dir
+    folder = deviceDir(device, root)
+    (folder / HOLOGRAMS_DIR_NAME).mkdir(parents=True, exist_ok=True)
+    copied = []
+    for stem, suffix in ((device.factory_lut, ".bmp"), (device.lut, ".LUT")):
+        if not stem:
+            continue
+        old_place, target = root / f"{stem}{suffix}", folder / f"{stem}{suffix}"
+        if old_place.is_file() and not target.exists():
+            shutil.copy2(old_place, target)
+            copied.append(target.name)
+    return copied
+
+
 def factoryLutPath(name: str, devices_dir: Path | None = None) -> Path:
-    """Path of the factory correction file ``name`` (stored without extension in devices.json)."""
+    """Old location of the factory correction file ``name`` (directly in devices/; read until copied to the device folder)."""
     return (DEVICES_DIR if devices_dir is None else devices_dir) / f"{name}.bmp"
 
 
@@ -436,7 +487,7 @@ def setDeviceFactoryLut(board: int, name: str, path: Path = DEVICES_FILE) -> boo
 
 
 def lutPath(name: str, devices_dir: Path | None = None) -> Path:
-    """Path of the controller LUT file ``name`` (stored without extension in devices.json)."""
+    """Old location of the controller LUT file ``name`` (directly in devices/; read until copied to the device folder)."""
     return (DEVICES_DIR if devices_dir is None else devices_dir) / f"{name}.LUT"
 
 
@@ -520,17 +571,41 @@ def defaultDeviceName(serial: int) -> str:
     return f"slm{serial}"
 
 
-def setDeviceName(board: int, name: str, path: Path = DEVICES_FILE) -> bool:
-    """Record ``name`` for the listed real device on ``board``; False if not listed. Raises ValueError if empty."""
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"device name must not be empty, got {name!r}")
+def isValidDeviceName(name: str) -> bool:
+    """Letters, digits, spaces, '-' and '_' only, no leading/trailing spaces: the name is also the device folder name."""
+    return isinstance(name, str) and isValidProfileName(name) and name.lower() != SIMULATED_DEVICE_DIR_NAME
+
+
+def setDeviceName(board: int, name: str, path: Path = DEVICES_FILE, devices_dir: Path | None = None) -> bool:
+    """Record ``name`` for the listed real device on ``board`` and rename its folder; False if not listed.
+
+    Raises ValueError if the name is not a valid folder name or another device has it (also when its folder exists).
+    """
+    name = name.strip() if isinstance(name, str) else name
+    if not isValidDeviceName(name):
+        raise ValueError(f"device name {name!r} must be letters, digits, spaces, '-' or '_' (it is also the folder name)")
     devices = loadDevices(path)
-    for device in devices:
-        if device.board == board and not device.simulated:
-            device.name = name.strip()
-            saveDevices(devices, path)
-            return True
-    return False
+    device = next((d for d in devices if d.board == board and not d.simulated), None)
+    if device is None:
+        return False
+    if any(d is not device and not d.simulated and deviceDirName(d).lower() == name.lower() for d in devices):
+        raise ValueError(f"another device is already named {name!r}")
+    root = path.parent if devices_dir is None else devices_dir
+    old_folder, new_folder = deviceDir(device, root), root / name
+    renamed = False
+    if old_folder.is_dir() and old_folder.name != name:
+        if new_folder.exists() and new_folder.resolve() != old_folder.resolve():
+            raise ValueError(f"a folder named {name!r} already exists in {root}")
+        old_folder.rename(new_folder)
+        renamed = True
+    device.name = name
+    try:
+        saveDevices(devices, path)
+    except OSError:
+        if renamed:
+            new_folder.rename(old_folder)
+        raise
+    return True
 
 
 def setDeviceSerial(board: int, serial: int, path: Path = DEVICES_FILE) -> bool:

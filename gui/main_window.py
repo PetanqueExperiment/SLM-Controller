@@ -19,7 +19,8 @@ import pyqtgraph.dockarea as dockarea
 
 from libslm.slm import MeadowlarkSLM, SerialMismatchError, checkLutFile, loadCorrectionPattern
 from gui.paths import DEFAULT_PROFILE, DEVICES_DIR, DEVICES_FILE, PROFILE_DIR, PROFILE_TEMPLATE_FILE, STARTUP_FIXED, STARTUP_MODES
-from gui.settings import MAX_SLM_PIXEL_PITCH_UM, MIN_SLM_PIXEL_PITCH_UM, PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceImageShape, deviceLabel, devicePixelPitchUm, deviceSlmRadiusM, defaultDeviceName, setDeviceName, parsePixelPitchUm, setDeviceImageSize, setDevicePixelPitchUm, setDeviceSlmRadiusM, MAX_SLM_RADIUS_M, factoryLutPath, lutPath, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
+from gui.settings import MAX_SLM_PIXEL_PITCH_UM, MIN_SLM_PIXEL_PITCH_UM, PROFILE_LOADED, PROFILE_MISSING, SIMULATED_BOARD, AppSettings, Device, deviceImageShape, deviceLabel, devicePixelPitchUm, deviceSlmRadiusM, defaultDeviceName, setDeviceName, parsePixelPitchUm, setDeviceImageSize, setDevicePixelPitchUm, setDeviceSlmRadiusM, MAX_SLM_RADIUS_M, HOLOGRAMS_DIR_NAME, deviceDir, deviceLutPath, deviceWfcPath, prepareDeviceDir, setDeviceFactoryLut, setDeviceLut, ProfileTemplateError, addDevice, findDevice, isValidProfileName, listProfiles, loadDevices, loadProfileParams, parseBoard, profilePath, restoreDefaultProfile, setDeviceSerial, writeProfile
+from gui.constants import SLM_PATTERNS_DIR
 from gui.helpers import MenuHeaderLabel, framed_panel
 from gui.stdio_tee import StreamToPlainText
 from gui.panels.elementary import ElementaryControlPanel
@@ -423,6 +424,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         except Exception as e:
             self._connectFailed(name, e)
             return None
+        self._prepareDeviceDir(SIMULATED_BOARD, name)
         return slm, devicePixelPitchUm(SIMULATED_BOARD)
 
     def _openRealSlm(self, board: int, device: Optional[Device], name: str) -> Optional[tuple[MeadowlarkSLM, float]]:
@@ -453,9 +455,40 @@ class SLMGUI(QtWidgets.QMainWindow):
             if setDevicePixelPitchUm(board, pitch_um):
                 print(f"{name}: pixel pitch {pitch_um:g} µm recorded in the device list")
         if device is not None and device.name is None and slm.serial is not None:
-            if setDeviceName(board, defaultDeviceName(slm.serial)):
-                print(f"{name}: named {defaultDeviceName(slm.serial)!r} in the device list (Device ▸ Set device parameters… to rename)")
+            try:
+                if setDeviceName(board, defaultDeviceName(slm.serial)):
+                    print(f"{name}: named {defaultDeviceName(slm.serial)!r} in the device list (Device ▸ Set device parameters… to rename)")
+            except (OSError, ValueError) as e:
+                print(f"{name}: could not name it {defaultDeviceName(slm.serial)!r}: {e}")
+        self._prepareDeviceDir(board, name)
         return slm, pitch_um
+
+    def hologramsDir(self) -> str:
+        """Folder the hologram file dialogs open in: holograms/ of the selected SLM's device folder (created if
+        missing), or SLM_patterns/ when no SLM is selected or the folder cannot be created."""
+        device = None if self.board is None else findDevice(self.board)
+        if device is not None:
+            folder = deviceDir(device) / HOLOGRAMS_DIR_NAME
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                return str(folder)
+            except OSError as e:
+                print(f"Could not create {folder}: {e}; using {SLM_PATTERNS_DIR}")
+        os.makedirs(SLM_PATTERNS_DIR, exist_ok=True)
+        return SLM_PATTERNS_DIR
+
+    def _prepareDeviceDir(self, board: int, name: str) -> None:
+        """Create the device folder (with holograms/) and copy a LUT / WFC still stored directly in devices/ into it."""
+        device = findDevice(board)
+        if device is None:
+            return
+        try:
+            copied = prepareDeviceDir(device)
+        except OSError as e:
+            print(f"{name}: could not prepare the device folder {deviceDir(device)}: {e}")
+            return
+        if copied:
+            print(f"{name}: copied {', '.join(copied)} into {deviceDir(device)}")
 
     def _reportedPixelPitchUm(self, slm: MeadowlarkSLM, board: int, device: Optional[Device], name: str) -> Optional[float]:
         """Pixel pitch [µm] reported by the just-connected real SLM (stored / default value if not reported); None if implausible."""
@@ -516,7 +549,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         return True
 
     def _deviceLutPath(self, board: int, device: Optional[Device]) -> tuple[bool, Optional[Path]]:
-        """LUT to load at connect: (True, devices/<lut>.LUT) if the device has one set, (True, None) if none is set.
+        """LUT to load at connect: (True, devices/<device>/<lut>.LUT) if the device has one set, (True, None) if none is set.
 
         Returns (False, None) with a message if a LUT is set but its file is missing, so the SLM is never driven with
         a LUT other than the one chosen.
@@ -524,7 +557,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         name = "" if device is None else device.lut
         if board == SIMULATED_BOARD or not name:
             return True, None
-        path = lutPath(name)
+        path = deviceLutPath(device)
         if path.is_file():
             return True, path
         label = self._boardLabel(board)
@@ -534,7 +567,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         return False, None
 
     def _loadFactoryLut(self, device: Optional[Device]) -> None:
-        """Load the connected SLM's factory correction (devices.json wfc → devices/<name>.bmp) into self.factory_lut.
+        """Load the connected SLM's factory correction (devices.json wfc → devices/<device>/<wfc>.bmp) into self.factory_lut.
 
         The Simulated SLM gets none. A real SLM without a usable file gets none either, with a warning.
         """
@@ -547,7 +580,7 @@ class SLMGUI(QtWidgets.QMainWindow):
         if not name:
             reason = "no WFC is set"
         else:
-            path = factoryLutPath(name)
+            path = deviceWfcPath(device)
             try:
                 self.factory_lut = loadCorrectionPattern(path, (param.ImgResY, param.ImgResX))
                 print(f"{label}: WFC {name!r} loaded from {path}")
@@ -941,15 +974,17 @@ class SLMGUI(QtWidgets.QMainWindow):
         DeviceParametersDialog(self, board).exec_()
 
     def _setFactoryLutDialog(self) -> None:
-        """Device ▸ Set device parameters… ▸ WFC Load…: pick the factory correction .bmp for the selected (real) SLM, copy it to devices/ and store its name."""
+        """Device ▸ Set device parameters… ▸ WFC Load…: pick the factory correction .bmp for the selected (real) SLM, copy it to its device folder and store its name."""
         board = self.board
         if board is None or board == SIMULATED_BOARD:
             return
         label = self._boardLabel(board)
-        if findDevice(board) is None:
+        device = findDevice(board)
+        if device is None:
             QtWidgets.QMessageBox.warning(self, "Set WFC", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
             return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"WFC for {label}", str(DEVICES_DIR), "Bitmap (*.bmp)")
+        folder = deviceDir(device)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"WFC for {label}", str(folder if folder.is_dir() else DEVICES_DIR), "Bitmap (*.bmp)")
         if not path:
             return
         source = Path(path)
@@ -959,12 +994,12 @@ class SLMGUI(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Set WFC", f"{source.name} cannot be used:\n{e}")
             return
         name = source.stem
-        target = factoryLutPath(name)
+        target = folder / f"{name}.bmp"
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not (target.exists() and target.resolve() == source.resolve()):
                 if target.exists() and not filecmp.cmp(source, target, shallow=False):
-                    text = f"A different file named {target.name} is already in\n{target.parent}\n(it may be used by another SLM).\n\nOverwrite it?"
+                    text = f"A different file named {target.name} is already in\n{target.parent}.\n\nOverwrite it?"
                     if QtWidgets.QMessageBox.question(self, "Set WFC", text) != QtWidgets.QMessageBox.Yes:
                         return
                 shutil.copyfile(source, target)
@@ -981,7 +1016,7 @@ class SLMGUI(QtWidgets.QMainWindow):
             print(f"{label}: new WFC applied")
 
     def _setLutDialog(self) -> None:
-        """Device ▸ Set device parameters… ▸ LUT Load…: pick a .LUT for the selected (real) SLM, copy it to devices/ and store its name.
+        """Device ▸ Set device parameters… ▸ LUT Load…: pick a .LUT for the selected (real) SLM, copy it to its device folder and store its name.
 
         If that SLM is connected, the LUT is loaded into its controller right away and the current frame is resent.
         """
@@ -992,10 +1027,12 @@ class SLMGUI(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Set LUT", "A frame sequence is running on the SLM.\nStop it first (Dynamic mode ▸ Stop).")
             return
         label = self._boardLabel(board)
-        if findDevice(board) is None:
+        device = findDevice(board)
+        if device is None:
             QtWidgets.QMessageBox.warning(self, "Set LUT", f"{label} is not in the device list.\nAdd it first with Device ▸ Add device.")
             return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"LUT for {label}", str(DEVICES_DIR), "LUT (*.LUT *.lut)")
+        folder = deviceDir(device)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"LUT for {label}", str(folder if folder.is_dir() else DEVICES_DIR), "LUT (*.LUT *.lut)")
         if not path:
             return
         source = Path(path)
@@ -1005,12 +1042,12 @@ class SLMGUI(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Set LUT", f"{source.name} cannot be used:\n{e}")
             return
         name = source.stem
-        target = lutPath(name)
+        target = folder / f"{name}.LUT"
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not (target.exists() and target.resolve() == source.resolve()):
                 if target.exists() and not filecmp.cmp(source, target, shallow=False):
-                    text = f"A different file named {target.name} is already in\n{target.parent}\n(it may be used by another SLM).\n\nOverwrite it?"
+                    text = f"A different file named {target.name} is already in\n{target.parent}.\n\nOverwrite it?"
                     if QtWidgets.QMessageBox.question(self, "Set LUT", text) != QtWidgets.QMessageBox.Yes:
                         return
                 shutil.copyfile(source, target)

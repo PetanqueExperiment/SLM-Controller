@@ -17,7 +17,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 
 from gui.parameters import param
 from MyQtLineEdit.myqtLineEdit import MyQtLineEdit
-from gui.constants import SLM_PATTERNS_DIR, SYSTEM_MAGNIFICATION, TWEEZER_ROIS_DIR
+from gui.constants import SYSTEM_MAGNIFICATION, TWEEZER_ROIS_DIR
 from gui.helpers import framed_panel, parse_pasted_coordinates
 from gui import hologram_generator
 from gui.panels.arbitrary_arrays import rois
@@ -601,8 +601,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         '''
         Opens the dialog and saves the selected file
         '''
-        os.makedirs(SLM_PATTERNS_DIR, exist_ok=True)
-        self.gui.file = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Hologram', SLM_PATTERNS_DIR)[0]
+        self.gui.file = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Hologram', self.gui.hologramsDir())[0]
         if not self.gui.file:
             return
         self.savePattern(name=self.gui.file)
@@ -637,8 +636,7 @@ class ArbitraryArraysPanel(EqualizationMixin, LegacyAlgorithmsMixin, QtWidgets.Q
         '''
         Open the dialog and gets the selected file
         '''
-        os.makedirs(SLM_PATTERNS_DIR, exist_ok=True)
-        self.gui.file = QtWidgets.QFileDialog.getOpenFileName(self, 'Load Hologram', SLM_PATTERNS_DIR)[0]
+        self.gui.file = QtWidgets.QFileDialog.getOpenFileName(self, 'Load Hologram', self.gui.hologramsDir())[0]
         if not self.gui.file:
             return
         self.loadPattern(name=self.gui.file)

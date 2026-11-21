@@ -7,11 +7,10 @@ stores them there.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-from gui.constants import SLM_PATTERNS_DIR
 from gui.panels.modes.logic import MAX_TRIGGER_TIMEOUT_MS, MIN_TRIGGER_TIMEOUT_MS, DynamicMode, HologramSlot, ordinal, readHologramFile
 
 if TYPE_CHECKING:
@@ -22,9 +21,9 @@ NUMBER_PADDING_PX: int = 16
 LIST_WIDTH_FRACTION: float = 0.5
 
 
-def chooseHologramFile(parent: QtWidgets.QWidget, title: str, start: str | None) -> tuple[str, dict[str, Any]] | None:
-    """Ask for a hologram file and read it; None if cancelled or unreadable (the error is printed)."""
-    path, _ = QtWidgets.QFileDialog.getOpenFileName(parent, title, start or SLM_PATTERNS_DIR, 'Holograms (*.pkl *.npy *.bmp);;All files (*.*)')
+def chooseHologramFile(parent: QtWidgets.QWidget, title: str, start: str) -> tuple[str, dict[str, Any]] | None:
+    """Ask for a hologram file (dialog opening at ``start``) and read it; None if cancelled or unreadable (the error is printed)."""
+    path, _ = QtWidgets.QFileDialog.getOpenFileName(parent, title, start, 'Holograms (*.pkl *.npy *.bmp);;All files (*.*)')
     if not path:
         return None
     try:
@@ -37,10 +36,11 @@ def chooseHologramFile(parent: QtWidgets.QWidget, title: str, start: str | None)
 class HologramSlotBlock(QtWidgets.QWidget):
     """One frame of the dynamic list on one line: number, Load and the loaded file name."""
 
-    def __init__(self, mode: DynamicMode, index: int, number_width: int) -> None:
+    def __init__(self, mode: DynamicMode, index: int, number_width: int, holograms_dir: Callable[[], str]) -> None:
         super().__init__()
         self.mode = mode
         self.index = index
+        self._holograms_dir = holograms_dir
         self.titleLabel = QtWidgets.QLabel(str(index + 1))
         self.loadBtn = QtWidgets.QPushButton('Load')
         self.nameLabel = QtWidgets.QLabel(NO_HOLOGRAM_TEXT)
@@ -70,7 +70,7 @@ class HologramSlotBlock(QtWidgets.QWidget):
 
     def loadHologram_clicked(self) -> None:
         """Choose the hologram file of this frame (stored in the dynamic mode; nothing is sent to the SLM)."""
-        chosen = chooseHologramFile(self, 'Load %s hologram' % ordinal(self.index + 1), self.slot.path)
+        chosen = chooseHologramFile(self, 'Load %s hologram' % ordinal(self.index + 1), self.slot.path or self._holograms_dir())
         if chosen is None:
             return
         self.mode.setHologram(self.index, *chosen)
@@ -195,7 +195,7 @@ class DynamicModePage(QtWidgets.QWidget):
         self.setSequenceLoaded(self._sequence_loaded)
 
     def _addBlock(self, index: int) -> None:
-        block = HologramSlotBlock(self.mode, index, self._number_width)
+        block = HologramSlotBlock(self.mode, index, self._number_width, self.gui.hologramsDir)
         self.listLayout.addWidget(block)
         self.blocks.append(block)
 

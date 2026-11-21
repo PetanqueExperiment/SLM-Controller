@@ -74,9 +74,12 @@ by line; I judge it by behaviour. It must be robust in daily lab use.
   `serial`, `wfc`, `lut`, `width_px`, `height_px`, `pixel_pitch_um`, `slm_radius_m`; the Simulated SLM
   is built in, uses no correction, and only its geometry is stored, under `simulated_slm`. Old key
   `factory_lut` is still read.
-- `devices/<wfc>.bmp` — per-SLM manufacturer wavefront correction (WFC), loaded as `SLMGUI.factory_lut`;
-  `devices/<lut>.LUT` — per-SLM controller LUT loaded at connect (none set = no LUT loaded, the
-  controller keeps its current one). Both set with Device ▸ Set device parameters….
+- `devices/<device>/` — one folder per device, named after its `name` (`board<N>` until it has one,
+  `simulated_slm` for the Simulated SLM; renamed with the device): `<wfc>.bmp` (manufacturer wavefront
+  correction, loaded as `SLMGUI.factory_lut`), `<lut>.LUT` (controller LUT loaded at connect; none set =
+  no LUT loaded, the controller keeps its current one), `holograms/` (created at the first connect).
+  WFC / LUT are copied there by Device ▸ Set device parameters… ▸ Load…. Files from the old layout
+  (directly in `devices/`) are still read, and copied into the device folder at its next connect.
 - `logs/` — temperature CSVs, also written to `temperature_logs/` in the repo; not in simulate mode.
 
 ## How to work here

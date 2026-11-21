@@ -339,7 +339,7 @@ def test_device_name(tmp_path):
     assert entry["name"] == "slm6843" and list(entry)[:2] == ["name", "board"]
     assert settings.setDeviceName(1, "tweezer SLM", path) and settings.findDevice(1, path).name == "tweezer SLM"
     assert not settings.setDeviceName(settings.SIMULATED_BOARD, "x", path) and not settings.setDeviceName(5, "x", path)
-    for bad in ["", "   ", None]:
+    for bad in ["", "   ", None, "a/b", "simulated_slm"]:
         with pytest.raises(ValueError):
             settings.setDeviceName(1, bad, path)
     path.write_text(json.dumps({"devices": [{"board": 1, "name": 5}, {"board": 2, "name": "  "}]}), encoding="utf-8")
@@ -350,3 +350,42 @@ def test_device_entry_key_order(tmp_path):
     path = tmp_path / "devices.json"
     settings.saveDevices([settings.Device(1, 6843, "w", "l", 1024, 1024, 17.0, 0.0087, "slm6843")], path)
     assert list(json.loads(path.read_text(encoding="utf-8"))["devices"][0]) == ["name", "board", "serial", "wfc", "lut", "width_px", "height_px", "pixel_pitch_um", "slm_radius_m"]
+
+
+def test_device_folder_names(tmp_path):
+    assert settings.deviceDirName(settings.Device(1)) == "board1"
+    assert settings.deviceDirName(settings.Device(1, name="slm6843")) == "slm6843"
+    assert settings.deviceDirName(settings.Device(settings.SIMULATED_BOARD)) == "simulated_slm"
+    assert settings.deviceDir(settings.Device(2, name="x"), tmp_path) == tmp_path / "x"
+
+
+def test_prepare_device_dir_creates_holograms_and_copies_old_files(tmp_path):
+    (tmp_path / "w.bmp").write_bytes(b"wfc")
+    (tmp_path / "l.LUT").write_text("0 0\n", encoding="ascii")
+    device = settings.Device(1, factory_lut="w", lut="l", name="slm6843")
+    assert settings.deviceWfcPath(device, tmp_path) == tmp_path / "w.bmp"
+    assert sorted(settings.prepareDeviceDir(device, tmp_path)) == ["l.LUT", "w.bmp"]
+    folder = tmp_path / "slm6843"
+    assert (folder / "holograms").is_dir() and (folder / "w.bmp").read_bytes() == b"wfc" and (tmp_path / "w.bmp").exists()
+    assert settings.deviceWfcPath(device, tmp_path) == folder / "w.bmp" and settings.deviceLutPath(device, tmp_path) == folder / "l.LUT"
+    assert settings.prepareDeviceDir(device, tmp_path) == []
+    assert settings.deviceLutPath(settings.Device(1, lut="missing", name="slm6843"), tmp_path) == folder / "missing.LUT"
+
+
+def test_renaming_a_device_renames_its_folder(tmp_path):
+    path = tmp_path / "devices.json"
+    settings.addDevice(1, path)
+    settings.addDevice(2, path)
+    (tmp_path / "board1" / "holograms").mkdir(parents=True)
+    (tmp_path / "board1" / "l.LUT").write_text("0 0\n", encoding="ascii")
+    assert settings.setDeviceName(1, "slm6843", path)
+    assert not (tmp_path / "board1").exists() and (tmp_path / "slm6843" / "l.LUT").exists()
+    assert settings.setDeviceName(1, "tweezer SLM", path)
+    assert (tmp_path / "tweezer SLM" / "holograms").is_dir() and not (tmp_path / "slm6843").exists()
+    with pytest.raises(ValueError, match="already named"):
+        settings.setDeviceName(2, "Tweezer SLM", path)
+    (tmp_path / "board2").mkdir()
+    (tmp_path / "taken").mkdir()
+    with pytest.raises(ValueError, match="already exists"):
+        settings.setDeviceName(2, "taken", path)
+    assert (tmp_path / "board2").is_dir() and settings.findDevice(2, path).name is None
