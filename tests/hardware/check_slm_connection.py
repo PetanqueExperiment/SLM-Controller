@@ -1,11 +1,12 @@
 """Check the connection to the Meadowlark SLM through the same driver code the GUI uses.
 
-Close the SLM GUI first: only one process can hold the Blink SDK.
+Close the SLM GUI first: only one process can hold the Blink SDK. Run from the SLM-Controller folder
+(this script is not collected by pytest):
 
-    SLM_venv\\Scripts\\python.exe test_slm_connection.py
-    SLM_venv\\Scripts\\python.exe test_slm_connection.py --write-blank
-    SLM_venv\\Scripts\\python.exe test_slm_connection.py --simulate
-    SLM_venv\\Scripts\\python.exe test_slm_connection.py --lut "C:\\...\\slm6801_at785_33C.LUT"
+    SLM_venv\\Scripts\\python.exe tests\\hardware\\check_slm_connection.py
+    SLM_venv\\Scripts\\python.exe tests\\hardware\\check_slm_connection.py --write-blank
+    SLM_venv\\Scripts\\python.exe tests\\hardware\\check_slm_connection.py --simulate
+    SLM_venv\\Scripts\\python.exe tests\\hardware\\check_slm_connection.py --lut "C:\\...\\slm6801_at785_33C.LUT"
 """
 import argparse
 import sys
@@ -14,6 +15,8 @@ from pathlib import Path
 from ctypes import c_double, c_int
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import libslm.slm as comm
 from libslm.slm import MeadowlarkSLM

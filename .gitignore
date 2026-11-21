@@ -1,11 +1,14 @@
-SLM_venv/
-.vscode/
-test.ipynb
+# cache
 __pycache__/
+
+# venv
+SLM_venv/
+
+# IDE
+.vscode/
+
+# data
 SLM_patterns/
-Trap_coordinates/
 Tweezer_ROIs/
 Zernike_corrections/
 temperature_logs/*.csv
-test.ipynb
-.vscode/
