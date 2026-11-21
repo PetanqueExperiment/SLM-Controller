@@ -3,7 +3,6 @@
 import time
 
 import numpy as np
-import pytest
 
 from gui.sequence_run import RUN_ERROR, RUN_NO_TRIGGER, RUN_STOPPED, playSequence
 from gui.slm_frame import FrameTerms, composeSlmFrame

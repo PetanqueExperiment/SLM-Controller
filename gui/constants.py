@@ -19,8 +19,6 @@ ZERNIKE_CORRECTIONS_DIR: str = os.path.join(LOCAL_DIR, "Zernike_corrections")
 TWEEZER_ROIS_DIR: str = os.path.join(LOCAL_DIR, "Tweezer_ROIs")
 ZERNIKE_DEFAULT_COEFFS_JSON: str = "zernike_coefficients_default.json"
 
-SH_CORRECTION_NPY: str = os.path.join(LOCAL_DIR, "SH_correction.npy")
-
 DIR_SHARED_DETEKTOR: str = "Y:\\Public"
 MESSAGE_FILE: str = DIR_SHARED_DETEKTOR + "\\SYNC_SLM_CAM.txt"
 FILE_INTENSITY: str = DIR_SHARED_DETEKTOR + "\\file_intensity.dat"

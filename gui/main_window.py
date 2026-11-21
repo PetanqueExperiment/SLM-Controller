@@ -35,7 +35,7 @@ from gui.sequence_run import RUN_ERROR, RUN_NO_TRIGGER
 from gui.sequence_thread import SequenceRunThread
 from gui.slm_frame import FrameTerms, composeSlmFrame
 from gui.panels.slm_info import SlmInfoDock
-from gui.zernike import __zernikepolar__, __zernikepolynomials__
+from libslm.zernike import __zernikepolynomials__
 
 from gui.parameters import ParametersError, loadParameters, param, setImageSize, setPixelPitchUm, setSlmRadiusM
 from gui.parameters_dialog import ParametersDialog
@@ -101,7 +101,6 @@ class SLMGUI(QtWidgets.QMainWindow):
 
     # --- Remote control / state saving ---
     _remote_control: dict[str, Callable[..., Any]]
-    _state_dict: dict[str, Any]
     _hero: Optional[SLMHero]
 
     # --- SLM coordinate grids ---
@@ -255,8 +254,6 @@ class SLMGUI(QtWidgets.QMainWindow):
 
         self._remote_control = {}
 
-        self._state_dict = {}
-
         self.settings = AppSettings.load()
         self.current_profile = self.settings.startupProfile()
         self._setStartupGeometry()
@@ -351,31 +348,6 @@ class SLMGUI(QtWidgets.QMainWindow):
             "SLM1: trefoil2 0": self.aberration.updateAberration_trefoil2_0,
             "SLM1: trefoil2 90": self.aberration.updateAberration_trefoil2_90,
         }
-
-    def state_to_dict(self) -> None:
-        save_list = ["dx", "dy", "aberration_values", "file", "spacing", "theta_deg", "r_pi"]
-
-        for instance_name in save_list:
-            self._state_dict[instance_name] = self.__dict__[instance_name]
-
-        self._state_dict["TEM01_check"] = self.tem01ChkBx.isChecked()
-        self._state_dict["SO_check"] = self.SOChkBx.isChecked()
-        self._state_dict["LG_check"] = self.LGChkBx.isChecked()
-
-    def dict_to_state(self, memory_dict: dict[str, Any]) -> None:
-        try:
-            self.elementary.createGratingPattern(dx=memory_dict["dx"], dy=memory_dict["dy"])
-            self.aberration.updateAberration(aber_list=memory_dict["aberration_values"])
-            self._arbitrary.loadPattern(name=memory_dict["file"])
-
-            self.tem01spacingEdt.setText(str(memory_dict["spacing"]))
-            self.tem01ThetaEdt.setText(str(memory_dict["theta_deg"]))
-            self.tem01ChkBx.setChecked(memory_dict["TEM01_check"])
-            self.SOrpiEdt.setText(str(memory_dict["r_pi"]))
-            self.SOChkBx.setChecked(memory_dict["SO_check"])
-            self.LGChkBx.setChecked(memory_dict["LG_check"])
-        except Exception as e:
-            print(e)
 
     def _loadParameters(self) -> None:
         """Load the SLM / optics parameters (parameters/parameters.json) before anything uses them; warn about problems."""
@@ -1743,13 +1715,6 @@ class SLMGUI(QtWidgets.QMainWindow):
             sys.stdout = self._stdout_prev
         if getattr(self, "_stderr_prev", None) is not None:
             sys.stderr = self._stderr_prev
-
-    def adjustImageForS1028(self, array: np.ndarray) -> np.ndarray:
-        v_s, h_s = 1024, 1272
-        v, h = array.shape
-        converted_array = np.zeros([v_s, h_s])
-        converted_array[(v_s - v) // 2 : (v_s + v) // 2, (h_s - h) // 2 : (h_s + h) // 2] = np.fliplr(array)
-        return converted_array
 
     def updatePhase(self) -> None:
         if self._suspend_phase_updates:

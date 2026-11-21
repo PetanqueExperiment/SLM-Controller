@@ -58,7 +58,7 @@ written to `temperature_logs/` in the repo; not in simulate mode).
 - Ask before touching anything that changes what is sent to the hardware.
   Verify refactors of the hologram path bit-for-bit against the previous commit.
 - Physics/optics calculations (`gui/panels/arbitrary_arrays/` tweezer_array.py,
-  traps.py, rois.py; `gui/hologram_generator.py`; `gui/zernike.py`; `gui/constants.py`; trap
+  traps.py, rois.py; `gui/hologram_generator.py`; `libslm/zernike.py`; `gui/constants.py`; trap
   equalization) follow the clarity-first rules of data analysis code instead:
   explicit formulas, units in names, small reviewable diffs, explain physics
   changes first.

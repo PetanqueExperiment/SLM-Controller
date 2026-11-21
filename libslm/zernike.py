@@ -2,22 +2,9 @@
 This file was obtained from http://opticspy.org/
 '''
 
-#from __future__ import division as __division__
-import numpy as __np__
-#import interferometer_zenike as __interferometer__
 from numpy import cos as __cos__
 from numpy import sin as __sin__
 from numpy import sqrt as __sqrt__
-from numpy import arctan2 as __arctan2__
-import numpy as np
-#import matplotlib.pyplot as __plt__
-#import matplotlib.pyplot as plt
-##from mplot3d import Axes3D as __Axes3D__
-#from matplotlib import cm 
-#from matplotlib.ticker import LinearLocator as __LinearLocator__
-#from matplotlib.ticker import FormatStrFormatter as __FormatStrFormatter__
-
-
 
 
 def __zernikepolynomials__(r,u):

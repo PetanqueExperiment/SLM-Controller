@@ -25,7 +25,7 @@ def _test_wavelength_m(wavelength_m=None):
     from gui.settings import AppSettings, loadProfileParams
     name = AppSettings.load().startupProfile()
     params, _ = loadProfileParams(name)
-    wavelength_nm = params["grating"]["wavelength_nm"]
+    wavelength_nm = params["elementary"]["wavelength_nm"]
     print(f"Test wavelength from profile {name!r}: {wavelength_nm} nm")
     return wavelength_nm / 1e9
 

@@ -9,24 +9,7 @@ import sys
 import numpy as np
 from pyqtgraph.Qt import QtGui, QtWidgets
 
-from gui.constants import LOCAL_DIR, SH_CORRECTION_NPY
-
-
-def load_sh_correction_phase_file(ny: int, nx: int) -> np.ndarray:
-    """Load optional SH phase map in radians; shape must match SLM. Otherwise return zeros."""
-    out = np.zeros((ny, nx), dtype=np.float64)
-    if not os.path.isfile(SH_CORRECTION_NPY):
-        return out
-    arr = np.load(SH_CORRECTION_NPY)
-    arr = np.asarray(arr, dtype=np.float64)
-    if arr.shape == (ny, nx):
-        return arr
-    print(
-        "SH_correction.npy shape",
-        arr.shape,
-        "does not match SLM (%d, %d); Shack–Hartmann correction disabled until fixed." % (ny, nx),
-    )
-    return out
+from gui.constants import LOCAL_DIR
 
 
 def parse_pasted_coordinates(text: str | None) -> np.ndarray:

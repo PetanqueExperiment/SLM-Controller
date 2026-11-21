@@ -2,16 +2,13 @@
 
 Known not to work as is:
   - ``randomMask`` uses ``gui.y_slm`` and ``GAA`` uses ``gui.delta_traps``; neither exists any more.
-  - ``devide_slm_area_loop`` needs ``trap_equalization_ramsey``, now only in ``docs/old codes - for reference/``.
   - ``Equalization_intensity_thread`` is never started.
 
 ``LegacyAlgorithmsMixin`` is a mixin of ArbitraryArraysPanel (uses ``gui``, ``computeHologram``, ``_ensure_traps_loaded``,
-``iterationsEdit``, ``devide_slm_area``).
+``iterationsEdit``).
 """
 
 from __future__ import annotations
-
-from importlib import reload
 
 import numpy as np
 from PyQt5.QtCore import pyqtSignal
@@ -19,12 +16,6 @@ from pyqtgraph.Qt import QtCore
 
 from gui.parameters import param
 from gui.constants import MESSAGE_FILE
-
-try:
-    import trap_equalization_ramsey as trap_equalization
-except ImportError:
-    trap_equalization = None
-
 
 class Equalization_intensity_thread(QtCore.QThread):
     '''
@@ -96,40 +87,6 @@ class Equalization_intensity_thread(QtCore.QThread):
 
 
 class LegacyAlgorithmsMixin:
-    def devide_slm_area_loop(self, loop: int | None = None) -> None:
-
-        global trap_equalization
-        trap_equalization = reload(trap_equalization)
-        # best_hologram =
-        folder_dir = self.gui.parent.experiment_directory
-
-        change = True
-        print('loop num', loop)
-
-        if loop == 0:
-            pass
-        else:
-            loop = int(loop)
-            loop = int(loop - 1)
-            if loop != 0.0:
-                current_map = self.gui.map
-
-            self.gui.map = trap_equalization.cal(folder_dir, loop=loop)
-
-            std = np.std(self.gui.map)  # martin
-            print(std)
-            if std > self.gui.std and (self.gui.std * 100) < 0.5:  # martin
-                change = False
-                self.gui.map = current_map
-                self.gui.phasePattern = self.gui.best_hologram
-
-            else:  # martin
-                self.gui.std = std  # martin
-                self.gui.best_hologram = self.gui.phasePattern  # martin
-                print('new point')  # martin
-
-            self.devide_slm_area(change, signal=1)
-
     def randomMask(self) -> np.ndarray | None:
         '''
         random mask (RM)
